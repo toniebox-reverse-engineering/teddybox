@@ -1,0 +1,15 @@
+menu "Toniebox Hardware Revision"
+
+choice CUSTOMER_AUDIO_BOARD
+    prompt "Toniebox revision"
+    default TONIEBOX_ESP32_V1_6_C
+    help
+        Select an audio board to use with the ESP-ADF
+
+config TONIEBOX_ESP32_V1_6_C
+    bool "Toniebox ESP32 v1.6.C"
+
+endchoice
+
+endmenu
+
