@@ -45,6 +45,20 @@ void dir_list(const char *path)
     }
     closedir(dir);
 }
+void dir_play(const char *path)
+{
+    DIR *dir = opendir(path);
+    while (true)
+    {
+        struct dirent *de = readdir(dir);
+        if (!de)
+        {
+            break;
+        }
+        ESP_LOGI(TAG, "  - %s", de->d_name);
+    }
+    closedir(dir);
+}
 
 void app_main(void)
 {
@@ -87,11 +101,16 @@ void app_main(void)
     ESP_LOGI(TAG, "[3.2] Create i2s stream to write data to codec chip");
     i2s_stream_cfg_t i2s_cfg = I2S_STREAM_CFG_DEFAULT();
     i2s_cfg.type = AUDIO_STREAM_WRITER;
+    i2s_cfg.i2s_config.use_apll = false;
+    i2s_cfg.i2s_config.dma_buf_count = 8;
+    i2s_cfg.i2s_config.dma_buf_len = 512;
+    
     i2s_stream_writer = i2s_stream_init(&i2s_cfg);
 
     ESP_LOGI(TAG, "[3.3] Create opus decoder");
     opus_decoder_cfg_t opus_dec_cfg = DEFAULT_OPUS_DECODER_CONFIG();
     opus_dec_cfg.stack_in_ext = false;
+    opus_dec_cfg.task_prio = 100;
     music_decoder = decoder_opus_init(&opus_dec_cfg);
 
     ESP_LOGI(TAG, "[3.4] Register all elements to audio pipeline");
