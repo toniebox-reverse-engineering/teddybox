@@ -113,6 +113,9 @@ esp_err_t audio_board_sdcard_init(esp_periph_set_handle_t set, periph_sdcard_mod
  */
 audio_board_handle_t audio_board_get_handle(void);
 
+
+audio_hal_handle_t audio_board_get_hal(void);
+
 /**
  * @brief Uninitialize the audio board
  *

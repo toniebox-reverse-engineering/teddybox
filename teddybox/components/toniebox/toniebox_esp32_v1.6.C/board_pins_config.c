@@ -35,7 +35,7 @@ static const char *TAG = "ESP32_S3_BOX";
 esp_err_t get_i2c_pins(i2c_port_t port, i2c_config_t *i2c_config)
 {
     AUDIO_NULL_CHECK(TAG, i2c_config, return ESP_FAIL);
-    if (port == I2C_NUM_0 || port == I2C_NUM_1) {
+    if (port == I2C_NUM_0) {
         i2c_config->sda_io_num = GPIO_NUM_5;
         i2c_config->scl_io_num = GPIO_NUM_6;
     } else {

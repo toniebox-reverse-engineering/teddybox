@@ -31,6 +31,20 @@
 static const char *TAG = "[TB]";
 
 static wl_handle_t s_test_wl_handle;
+void dir_list(const char *path)
+{
+    DIR *dir = opendir(path);
+    while (true)
+    {
+        struct dirent *de = readdir(dir);
+        if (!de)
+        {
+            break;
+        }
+        ESP_LOGI(TAG, "  - %s", de->d_name);
+    }
+    closedir(dir);
+}
 
 void app_main(void)
 {
@@ -45,17 +59,8 @@ void app_main(void)
 
     ESP_LOGI(TAG, "[ 1.1 ] Mount sdcard");
     audio_board_sdcard_init(set, SD_MODE_4_LINE);
-    DIR *dir = opendir("/sdcard");
-    while (true)
-    {
-        struct dirent *de = readdir(dir);
-        if (!de)
-        {
-            break;
-        }
-        ESP_LOGI(TAG, "  - %s", de->d_name);
-    }
-    closedir(dir);
+
+    dir_list("/sdcard");
 
     ESP_LOGI(TAG, "[ 1.2 ] Mount assets");
     esp_vfs_fat_sdmmc_mount_config_t mount_config = {
@@ -63,17 +68,7 @@ void app_main(void)
         .max_files = 5};
     esp_vfs_fat_spiflash_mount("/spiflash", NULL, &mount_config, &s_test_wl_handle);
 
-    dir = opendir("/spiflash");
-    while (true)
-    {
-        struct dirent *de = readdir(dir);
-        if (!de)
-        {
-            break;
-        }
-        ESP_LOGI(TAG, "  - %s", de->d_name);
-    }
-    closedir(dir);
+    dir_list("/spiflash");
 
     ESP_LOGI(TAG, "[ 2 ] Start codec chip");
     audio_board_handle_t board_handle = audio_board_init();
@@ -121,7 +116,7 @@ void app_main(void)
     ESP_LOGI(TAG, "[4.2] Listening event from peripherals");
     audio_event_iface_set_listener(esp_periph_set_get_event_iface(set), evt);
 
-    audio_hal_set_volume(board_handle->audio_hal, 40);
+    audio_hal_set_volume(audio_board_get_hal(), 20);
 
     ESP_LOGI(TAG, "[ 5 ] Start audio_pipeline");
     gpio_set_level(LED_BLUE_GPIO, 1);
