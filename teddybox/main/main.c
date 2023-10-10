@@ -89,11 +89,14 @@ void app_main(void)
 
     ESP_LOGI(TAG, "[ 4 ] play startup sound");
 
-    pb_play_default(CONTENT_DEFAULT_START);
+    pb_play_default(CONTENT_DEFAULT_STARTUP);
     vTaskDelay(5000 / portTICK_PERIOD_MS);
 
     ESP_LOGI(TAG, "[ 5 ] play audio");
-    pb_play_content(0x07BAC90F);
+    if(pb_play_content(0x07BAC90F) != ESP_OK)
+    {
+        pb_play_default(CONTENT_DEFAULT_CODE_KOALA);
+    }
 
     bool ear_big_prev = false;
     bool ear_small_prev = false;
