@@ -1,6 +1,7 @@
 
 
 #include <string.h>
+#include <sys/stat.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/queue.h"
@@ -79,11 +80,53 @@ void pb_init(esp_periph_set_handle_t set)
                             PB_TASK_PRIO, NULL, tskNO_AFFINITY);
 }
 
-void pb_play(const char *uri)
+esp_err_t pb_play(const char *uri)
 {
     ESP_LOGI(TAG, "[ * ] Queue uri: '%s'", uri);
     char *msg = strdup(uri);
     xQueueSend(playback_queue, &msg, portMAX_DELAY);
+
+    return ESP_OK;
+}
+
+esp_err_t pb_play_default_lang(uint32_t lang, uint32_t id)
+{
+    char filename[64];
+
+    sprintf(filename, "/sdcard/CONTENT/%08X/%08X", lang, id);
+    struct stat st;
+    if (stat(filename, &st) == 0)
+    {
+        return pb_play(filename);
+    }
+    lang = 0;
+    sprintf(filename, "/sdcard/CONTENT/%08X/%08X", lang, id);
+    if (stat(filename, &st) == 0)
+    {
+        return pb_play(filename);
+    }
+    ESP_LOGE(TAG, "requested ID does not exist: '%08X', neither in lang %d nor in default", id, lang);
+    return ESP_ERR_NOT_FOUND;
+}
+
+esp_err_t pb_play_default(uint32_t id)
+{
+    /* read language from NVS? */
+    return pb_play_default_lang(0, id);
+}
+
+esp_err_t pb_play_content(uint32_t id)
+{
+    char filename[64];
+
+    sprintf(filename, "/sdcard/CONTENT/%08X/%08X", id, 0x500304E0);
+    struct stat st;
+    if (stat(filename, &st) != 0)
+    {
+        ESP_LOGE(TAG, "requested file does not exist: '%s'", filename);
+        return ESP_ERR_NOT_FOUND;
+    }
+    return pb_play(filename);
 }
 
 void pb_mainthread(void *arg)

@@ -64,7 +64,7 @@ void app_main(void)
 
     ESP_LOGI(TAG, "[ 1.0 ] Board init");
     audio_board_handle_t board_handle = audio_board_init();
-    
+
     ESP_LOGI(TAG, "[ 1.1 ] Mount sdcard");
     audio_board_sdcard_init(set, SD_MODE_4_LINE);
 
@@ -89,11 +89,11 @@ void app_main(void)
 
     ESP_LOGI(TAG, "[ 4 ] play startup sound");
 
-    pb_play("/sdcard/CONTENT/00000000/00000000");
+    pb_play_default(CONTENT_DEFAULT_START);
     vTaskDelay(5000 / portTICK_PERIOD_MS);
 
     ESP_LOGI(TAG, "[ 5 ] play audio");
-    pb_play("/sdcard/CONTENT/07BAC90F/500304E0");
+    pb_play_content(0x07BAC90F);
 
     bool ear_big_prev = false;
     bool ear_small_prev = false;
