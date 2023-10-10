@@ -126,6 +126,10 @@ audio_hal_handle_t audio_board_get_hal(void);
  */
 esp_err_t audio_board_deinit(audio_board_handle_t audio_board);
 
+
+bool audio_board_ear_big(void);
+bool audio_board_ear_small(void);
+
 #ifdef __cplusplus
 }
 #endif

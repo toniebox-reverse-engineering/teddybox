@@ -43,11 +43,9 @@ extern audio_hal_func_t AUDIO_CODEC_DAC3100_DEFAULT_HANDLE;
 /**
  * @brief SDCARD Function Definition
  *        PMOD2 for one line sdcard
+ * required by sdcard.c 
  */
-#define FUNC_SDCARD_EN             (1)
 #define SDCARD_OPEN_FILE_NUM_MAX    5
-#define SDCARD_INTR_GPIO            -1
-#define SDCARD_PWR_CTRL             GPIO_NUM_47
 #define ESP_SD_PIN_CLK              GPIO_NUM_35
 #define ESP_SD_PIN_CMD              GPIO_NUM_38
 #define ESP_SD_PIN_D0               GPIO_NUM_36
@@ -61,25 +59,40 @@ extern audio_hal_func_t AUDIO_CODEC_DAC3100_DEFAULT_HANDLE;
 #define ESP_SD_PIN_CD               -1
 #define ESP_SD_PIN_WP               -1
 
+/* required by codec drivers, even if not selected */
+#define BOARD_PA_GAIN -1
 
+/* GPIO definitions 
+   https://github.com/toniebox-reverse-engineering/toniebox/blob/master/wiki/Toniebox-ESP32-Pinout.md 
+*/
 
-/**
- * @brief Audio Codec Chip Function Definition
- */
-#define FUNC_AUDIO_CODEC_EN         (1)
-#define DAC3100_RESET_GPIO          GPIO_NUM_26
-#define POWER_GPIO                  GPIO_NUM_45
-#define HEADPHONE_DETECT            -1
-#define CODEC_ADC_I2S_PORT          (0)
-#define CODEC_ADC_BITS_PER_SAMPLE   I2S_BITS_PER_SAMPLE_32BIT
-#define CODEC_ADC_SAMPLE_RATE       (48000)
-#define RECORD_HARDWARE_AEC         (true)
-#define BOARD_PA_GAIN               (0) /* Power amplifier gain defined by board (dB) */
+#define SPI_SS_GPIO                 GPIO_NUM_1
+#define SPI_MOSI_GPIO               GPIO_NUM_2
+#define SPI_MISO_GPIO               GPIO_NUM_3
+#define SPI_SCLK_GPIO               GPIO_NUM_4
+#define I2C_SDA_GPIO                GPIO_NUM_5
+#define I2C_SCL_GPIO                GPIO_NUM_6
+#define WAKEUP_GPIO                 GPIO_NUM_7
+#define ADC_CHARG_GPIO              GPIO_NUM_8
+#define ADC_VBATT_GPIO              GPIO_NUM_9
+#define I2S_DATA_GPIO               GPIO_NUM_10
+#define I2S_BCK_GPIO                GPIO_NUM_11
+#define I2S_WS_GPIO                 GPIO_NUM_12
+#define TRF7962A_IRQ_GPIO           GPIO_NUM_13
+#define LIS3DH_IRQ_GPIO             GPIO_NUM_14
 
 #define LED_BLUE_GPIO               GPIO_NUM_17
 #define LED_GREEN_GPIO              GPIO_NUM_18
 #define LED_RED_GPIO                GPIO_NUM_19
 
+#define EAR_BIG_GPIO                GPIO_NUM_20
+#define EAR_SMALL_GPIO              GPIO_NUM_21
+
+#define DAC3100_RESET_GPIO          GPIO_NUM_26
+
+#define POWER_GPIO                  GPIO_NUM_45
+#define SD_POWER_GPIO               GPIO_NUM_47
+#define HEADPHONE_DETECT            GPIO_NUM_48
 
 
 #endif

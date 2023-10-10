@@ -102,6 +102,24 @@ audio_board_handle_t audio_board_init(void)
     io_conf.pull_up_en = 0;
     gpio_config(&io_conf);
 
+    io_conf.mode = GPIO_MODE_OUTPUT;
+    io_conf.pin_bit_mask = BIT64(SD_POWER_GPIO);
+    io_conf.pull_down_en = 0;
+    io_conf.pull_up_en = 0;
+    gpio_config(&io_conf);
+
+    io_conf.mode = GPIO_MODE_INPUT;
+    io_conf.pin_bit_mask = BIT64(EAR_BIG_GPIO);
+    io_conf.pull_down_en = 0;
+    io_conf.pull_up_en = 1;
+    gpio_config(&io_conf);
+
+    io_conf.mode = GPIO_MODE_INPUT;
+    io_conf.pin_bit_mask = BIT64(EAR_SMALL_GPIO);
+    io_conf.pull_down_en = 0;
+    io_conf.pull_up_en = 1;
+    gpio_config(&io_conf);
+
     gpio_set_level(LED_BLUE_GPIO, 0);
     gpio_set_level(LED_GREEN_GPIO, 0);
     gpio_set_level(LED_RED_GPIO, 0);
@@ -110,6 +128,7 @@ audio_board_handle_t audio_board_init(void)
     gpio_set_level(LED_RED_GPIO, 1);
 
     gpio_set_level(POWER_GPIO, 1);
+    gpio_set_level(SD_POWER_GPIO, 0);
 
     io_conf.mode = GPIO_MODE_OUTPUT;
     io_conf.pin_bit_mask = BIT64(DAC3100_RESET_GPIO);
@@ -148,18 +167,9 @@ esp_err_t audio_board_sdcard_init(esp_periph_set_handle_t set, periph_sdcard_mod
         ESP_LOGE(TAG, "Current board only support 4-line SD mode!");
         return ESP_FAIL;
     }
-
-    gpio_config_t io_conf = {0};
-    io_conf.mode = GPIO_MODE_OUTPUT;
-    io_conf.pin_bit_mask = BIT64(get_sdcard_power_ctrl_gpio());
-    io_conf.pull_down_en = 0;
-    io_conf.pull_up_en = 0;
-    gpio_config(&io_conf);
-    gpio_set_level(get_sdcard_power_ctrl_gpio(), 0);
-
     periph_sdcard_cfg_t sdcard_cfg = {
         .root = "/sdcard",
-        .card_detect_pin = get_sdcard_intr_gpio(),
+        .card_detect_pin = -1,
         .mode = mode};
     esp_periph_handle_t sdcard_handle = periph_sdcard_init(&sdcard_cfg);
     esp_err_t ret = esp_periph_start(set, sdcard_handle);
@@ -202,4 +212,15 @@ esp_err_t audio_board_deinit(audio_board_handle_t audio_board)
     audio_free(audio_board);
     board_handle = NULL;
     return ret;
+}
+
+bool audio_board_ear_big()
+{
+    return gpio_get_level(EAR_BIG_GPIO) == 0;
+}
+
+
+bool audio_board_ear_small()
+{
+    return gpio_get_level(EAR_SMALL_GPIO) == 0;
 }

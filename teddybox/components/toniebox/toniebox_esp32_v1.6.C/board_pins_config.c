@@ -36,8 +36,8 @@ esp_err_t get_i2c_pins(i2c_port_t port, i2c_config_t *i2c_config)
 {
     AUDIO_NULL_CHECK(TAG, i2c_config, return ESP_FAIL);
     if (port == I2C_NUM_0) {
-        i2c_config->sda_io_num = GPIO_NUM_5;
-        i2c_config->scl_io_num = GPIO_NUM_6;
+        i2c_config->sda_io_num = I2C_SDA_GPIO;
+        i2c_config->scl_io_num = I2C_SCL_GPIO;
     } else {
         i2c_config->sda_io_num = -1;
         i2c_config->scl_io_num = -1;
@@ -51,9 +51,9 @@ esp_err_t get_i2s_pins(i2s_port_t port, board_i2s_pin_t *i2s_config)
 {
     AUDIO_NULL_CHECK(TAG, i2s_config, return ESP_FAIL);
     if (port == I2S_NUM_0) {
-        i2s_config->bck_io_num = GPIO_NUM_11;
-        i2s_config->ws_io_num = GPIO_NUM_12;
-        i2s_config->data_out_num = GPIO_NUM_10;
+        i2s_config->bck_io_num = I2S_BCK_GPIO;
+        i2s_config->ws_io_num = I2S_WS_GPIO;
+        i2s_config->data_out_num = I2S_DATA_GPIO;
         i2s_config->data_in_num = -1;
         i2s_config->mck_io_num = -1;
     } else if (port == I2S_NUM_1) {
@@ -88,19 +88,9 @@ esp_err_t get_spi_pins(spi_bus_config_t *spi_config, spi_device_interface_config
     return ESP_OK;
 }
 
-// sdcard
-
-int8_t get_sdcard_intr_gpio(void)
-{
-    return SDCARD_INTR_GPIO;
-}
+/* required by sdcard.c */
 
 int8_t get_sdcard_open_file_num_max(void)
 {
     return SDCARD_OPEN_FILE_NUM_MAX;
-}
-
-int8_t get_sdcard_power_ctrl_gpio(void)
-{
-    return SDCARD_PWR_CTRL;
 }
