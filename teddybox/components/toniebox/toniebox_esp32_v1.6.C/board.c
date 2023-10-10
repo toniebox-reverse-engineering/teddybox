@@ -32,12 +32,13 @@
 #include "dac3100.h"
 #include "driver/gpio.h"
 #include "lis3dh.h"
+#include "trf7962a.h"
 
 static const char *TAG = "TB-ESP32";
 
 static audio_board_handle_t board_handle = 0;
 
-static int i2c_init(audio_board_handle_t board)
+static esp_err_t i2c_init(audio_board_handle_t board)
 {
     i2c_config_t i2c_cfg = {
         .mode = I2C_MODE_MASTER,
@@ -68,6 +69,24 @@ static int i2c_init(audio_board_handle_t board)
     return res;
 }
 
+static esp_err_t spi_init(audio_board_handle_t board)
+{
+    esp_err_t ret;
+    spi_bus_config_t buscfg = {
+        .miso_io_num = SPI_MISO_GPIO,
+        .mosi_io_num = SPI_MOSI_GPIO,
+        .sclk_io_num = SPI_SCLK_GPIO,
+        .quadwp_io_num = -1,
+        .quadhd_io_num = -1,
+        .max_transfer_sz = 64};
+
+    board->spi_dev = SPI2_HOST;
+
+    ret = spi_bus_initialize(board->spi_dev, &buscfg, SPI_DMA_CH_AUTO);
+
+    return ret;
+}
+
 audio_board_handle_t audio_board_init(void)
 {
     if (board_handle)
@@ -80,78 +99,53 @@ audio_board_handle_t audio_board_init(void)
 
     ESP_LOGI(TAG, "Initializing GPIO");
     gpio_config_t io_conf = {0};
+
     io_conf.mode = GPIO_MODE_OUTPUT;
-    io_conf.pin_bit_mask = BIT64(LED_BLUE_GPIO);
+    io_conf.pin_bit_mask = 
+        BIT64(LED_BLUE_GPIO) | BIT64(LED_GREEN_GPIO) | BIT64(LED_RED_GPIO) | 
+        BIT64(POWER_GPIO) | BIT64(SD_POWER_GPIO) | BIT64(DAC3100_RESET_GPIO) | 
+        BIT64(SPI_SS_GPIO);
     io_conf.pull_down_en = 0;
     io_conf.pull_up_en = 0;
     gpio_config(&io_conf);
 
-    io_conf.mode = GPIO_MODE_OUTPUT;
-    io_conf.pin_bit_mask = BIT64(LED_GREEN_GPIO);
-    io_conf.pull_down_en = 0;
-    io_conf.pull_up_en = 0;
-    gpio_config(&io_conf);
-
-    io_conf.mode = GPIO_MODE_OUTPUT;
-    io_conf.pin_bit_mask = BIT64(LED_RED_GPIO);
-    io_conf.pull_down_en = 0;
-    io_conf.pull_up_en = 0;
-    gpio_config(&io_conf);
-
-    io_conf.mode = GPIO_MODE_OUTPUT;
-    io_conf.pin_bit_mask = BIT64(POWER_GPIO);
-    io_conf.pull_down_en = 0;
-    io_conf.pull_up_en = 0;
-    gpio_config(&io_conf);
-
-    io_conf.mode = GPIO_MODE_OUTPUT;
-    io_conf.pin_bit_mask = BIT64(SD_POWER_GPIO);
-    io_conf.pull_down_en = 0;
-    io_conf.pull_up_en = 0;
-    gpio_config(&io_conf);
 
     io_conf.mode = GPIO_MODE_INPUT;
-    io_conf.pin_bit_mask = BIT64(EAR_BIG_GPIO);
+    io_conf.pin_bit_mask = BIT64(EAR_BIG_GPIO) | BIT64(EAR_SMALL_GPIO);
     io_conf.pull_down_en = 0;
     io_conf.pull_up_en = 1;
     gpio_config(&io_conf);
 
-    io_conf.mode = GPIO_MODE_INPUT;
-    io_conf.pin_bit_mask = BIT64(EAR_SMALL_GPIO);
-    io_conf.pull_down_en = 0;
-    io_conf.pull_up_en = 1;
-    gpio_config(&io_conf);
-
-    io_conf.mode = GPIO_MODE_OUTPUT;
-    io_conf.pin_bit_mask = BIT64(DAC3100_RESET_GPIO);
-    io_conf.pull_down_en = 0;
-    io_conf.pull_up_en = 0;
-    gpio_config(&io_conf);
-
+    /* set LED to default states */
     gpio_set_level(LED_BLUE_GPIO, 0);
     gpio_set_level(LED_GREEN_GPIO, 0);
     gpio_set_level(LED_RED_GPIO, 0);
 
     /* init peripherals */
-
+    ESP_LOGI(TAG, "Initializing Peripherals");
     gpio_set_level(LED_RED_GPIO, 1);
 
     gpio_set_level(POWER_GPIO, 1);
     gpio_set_level(SD_POWER_GPIO, 0);
-    ESP_LOGI(TAG, "Initializing Peripherals");
 
     gpio_set_level(DAC3100_RESET_GPIO, 0);
     vTaskDelay(10 / portTICK_RATE_MS);
     gpio_set_level(DAC3100_RESET_GPIO, 1);
     vTaskDelay(10 / portTICK_RATE_MS);
 
-    ESP_LOGI(TAG, "Initializing I²C");
+    ESP_LOGI(TAG, " Initializing SPI");
+    spi_init(board_handle);
+
+    ESP_LOGI(TAG, "  - TRF7962A");
+    board_handle->trf7962a = trf7962a_init(board_handle->spi_dev, SPI_SS_GPIO);
+
+    ESP_LOGI(TAG, " Initializing I²C");
     i2c_init(board_handle);
-    
-    ESP_LOGI(TAG, "Initializing LS3DH");
+
+    ESP_LOGI(TAG, "  - LS3DH");
     board_handle->lis3dh = lis3dh_init(board_handle->i2c_handle);
 
-    ESP_LOGI(TAG, "Initializing DAC");
+    ESP_LOGI(TAG, "  - DAC3100");
     board_handle->audio_hal = audio_board_codec_init();
 
     gpio_set_level(LED_RED_GPIO, 0);

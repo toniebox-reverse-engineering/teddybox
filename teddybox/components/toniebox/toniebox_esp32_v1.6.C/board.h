@@ -35,6 +35,7 @@
 #include "driver/i2c.h"
 #include "i2c_bus.h"
 #include "lis3dh.h"
+#include "trf7962a.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -46,6 +47,8 @@ extern "C" {
 struct audio_board_handle {
     audio_hal_handle_t audio_hal; /*!< audio hardware abstract layer handle */
     lis3dh_t lis3dh;
+    trf7962a_t trf7962a;
+    spi_host_device_t spi_dev;
     i2c_bus_handle_t i2c_handle;
 };
 
