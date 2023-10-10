@@ -152,18 +152,18 @@ void pb_mainthread(void *arg)
                     switch ((int)msg.data)
                     {
                     case AEL_STATUS_STATE_PAUSED:
-                        ESP_LOGW(TAG, "[ * ] [%s] Event: Pause", source);
+                        ESP_LOGW(TAG, "[Event] [%s] Pause", source);
                         playing = true;
                         gpio_set_level(LED_BLUE_GPIO, 1);
                         break;
                     case AEL_STATUS_STATE_RUNNING:
-                        ESP_LOGW(TAG, "[ * ] [%s] Event: Run", source);
+                        ESP_LOGW(TAG, "[Event] [%s] Run", source);
                         playing = true;
                         gpio_set_level(LED_BLUE_GPIO, 1);
                         break;
                     case AEL_STATUS_STATE_STOPPED:
                     case AEL_STATUS_STATE_FINISHED:
-                        ESP_LOGW(TAG, "[ * ] [%s] Event: Stop", source);
+                        ESP_LOGW(TAG, "[Event] [%s] Stop", source);
                         if (msg.source == (void *)i2s_stream_writer)
                         {
                             gpio_set_level(LED_BLUE_GPIO, 0);
@@ -174,7 +174,7 @@ void pb_mainthread(void *arg)
                         }
                         break;
                     default:
-                        ESP_LOGW(TAG, "[ * ] [%s] Event: %d", source, (int)msg.data);
+                        ESP_LOGW(TAG, "[Event] [%s] %d", source, (int)msg.data);
                         break;
                     }
                 }
