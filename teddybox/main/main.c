@@ -21,6 +21,7 @@
 #include "periph_sdcard.h"
 #include "board.h"
 #include "playback.h"
+#include "wifi.h"
 
 static const char *TAG = "[TB]";
 
@@ -56,6 +57,14 @@ void dir_play(const char *path)
 
 void app_main(void)
 {
+    /* Initialize NVS — it is used to store PHY calibration data */
+    esp_err_t ret = nvs_flash_init();
+    if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
+        ESP_ERROR_CHECK(nvs_flash_erase());
+        ret = nvs_flash_init();
+    }
+    ESP_ERROR_CHECK( ret );
+
     esp_log_level_set("*", ESP_LOG_INFO);
     esp_log_level_set(TAG, ESP_LOG_INFO);
 
@@ -83,8 +92,9 @@ void app_main(void)
 
     ESP_LOGI(TAG, "[ 3 ] Start playback handler");
     pb_init(set);
+    wifi_init();
 
-    int volume = 30;
+    int volume = 10;
     audio_hal_set_volume(audio_board_get_hal(), volume);
 
     ESP_LOGI(TAG, "[ 4 ] play startup sound");
