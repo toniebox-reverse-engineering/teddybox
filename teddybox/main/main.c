@@ -16,12 +16,14 @@
 #include "esp_vfs_fat.h"
 #include "wear_levelling.h"
 #include "esp_partition.h"
+#include "esp_event.h"
 
 #include "esp_peripherals.h"
 #include "periph_sdcard.h"
 #include "board.h"
 #include "playback.h"
 #include "wifi.h"
+#include "webserver.h"
 
 static const char *TAG = "[TB]";
 
@@ -90,9 +92,11 @@ void app_main(void)
     ESP_LOGI(TAG, "[ 2 ] Start codec chip");
     audio_hal_ctrl_codec(board_handle->audio_hal, AUDIO_HAL_CODEC_MODE_DECODE, AUDIO_HAL_CTRL_START);
 
-    ESP_LOGI(TAG, "[ 3 ] Start playback handler");
+    ESP_LOGI(TAG, "[ 3 ] Start handlers");
+    
     pb_init(set);
     wifi_init();
+    www_init();
 
     int volume = 10;
     audio_hal_set_volume(audio_board_get_hal(), volume);
