@@ -30,16 +30,14 @@
 #include "periph_lcd.h"
 #include "periph_adc_button.h"
 #include "dac3100.h"
-#include "driver/i2c.h"
-#include "i2c_bus.h"
 #include "driver/gpio.h"
+#include "lis3dh.h"
 
 static const char *TAG = "TB-ESP32";
 
 static audio_board_handle_t board_handle = 0;
-static i2c_bus_handle_t i2c_handle;
 
-static int i2c_init()
+static int i2c_init(audio_board_handle_t board)
 {
     i2c_config_t i2c_cfg = {
         .mode = I2C_MODE_MASTER,
@@ -47,9 +45,9 @@ static int i2c_init()
         .scl_pullup_en = GPIO_PULLUP_ENABLE,
         .master.clk_speed = 400000};
     int res = get_i2c_pins(I2C_NUM_0, &i2c_cfg);
-    i2c_handle = i2c_bus_create(I2C_NUM_0, &i2c_cfg);
+    board->i2c_handle = i2c_bus_create(I2C_NUM_0, &i2c_cfg);
 
-    if (!i2c_handle)
+    if (!board->i2c_handle)
     {
         ESP_LOGE(TAG, "I2C init failed");
     }
@@ -60,11 +58,11 @@ static int i2c_init()
 
     ESP_LOGE(TAG, "I2C checks:");
     reg_add = 0x0F;
-    ret = i2c_bus_read_bytes(i2c_handle, 0x32, &reg_add, 1, &reg_data, 1);
+    ret = i2c_bus_read_bytes(board->i2c_handle, 0x32, &reg_add, 1, &reg_data, 1);
     ESP_LOGE(TAG, "  LIS3DH:  %s", ((ret == ESP_OK) && (reg_data == 0x33)) ? "[OK]" : "[FAIL]");
 
     reg_add = 0x00;
-    ret = i2c_bus_read_bytes(i2c_handle, DAC3100_ADDR, &reg_add, 1, &reg_data, 1);
+    ret = i2c_bus_read_bytes(board->i2c_handle, DAC3100_ADDR, &reg_add, 1, &reg_data, 1);
     ESP_LOGE(TAG, "  DAC3100: %s", (ret == ESP_OK) ? "[OK]" : "[FAIL]");
 
     return res;
@@ -77,6 +75,10 @@ audio_board_handle_t audio_board_init(void)
         ESP_LOGW(TAG, "The board has already been initialized!");
         return board_handle;
     }
+    board_handle = (audio_board_handle_t)audio_calloc(1, sizeof(struct audio_board_handle));
+    AUDIO_MEM_CHECK(TAG, board_handle, return NULL);
+
+    ESP_LOGI(TAG, "Initializing GPIO");
     gpio_config_t io_conf = {0};
     io_conf.mode = GPIO_MODE_OUTPUT;
     io_conf.pin_bit_mask = BIT64(LED_BLUE_GPIO);
@@ -120,34 +122,40 @@ audio_board_handle_t audio_board_init(void)
     io_conf.pull_up_en = 1;
     gpio_config(&io_conf);
 
-    gpio_set_level(LED_BLUE_GPIO, 0);
-    gpio_set_level(LED_GREEN_GPIO, 0);
-    gpio_set_level(LED_RED_GPIO, 0);
-
-    /* init peripherals */
-    gpio_set_level(LED_RED_GPIO, 1);
-
-    gpio_set_level(POWER_GPIO, 1);
-    gpio_set_level(SD_POWER_GPIO, 0);
-
     io_conf.mode = GPIO_MODE_OUTPUT;
     io_conf.pin_bit_mask = BIT64(DAC3100_RESET_GPIO);
     io_conf.pull_down_en = 0;
     io_conf.pull_up_en = 0;
     gpio_config(&io_conf);
 
+    gpio_set_level(LED_BLUE_GPIO, 0);
+    gpio_set_level(LED_GREEN_GPIO, 0);
+    gpio_set_level(LED_RED_GPIO, 0);
+
+    /* init peripherals */
+
+    gpio_set_level(LED_RED_GPIO, 1);
+
+    gpio_set_level(POWER_GPIO, 1);
+    gpio_set_level(SD_POWER_GPIO, 0);
+    ESP_LOGI(TAG, "Initializing Peripherals");
+
     gpio_set_level(DAC3100_RESET_GPIO, 0);
     vTaskDelay(10 / portTICK_RATE_MS);
     gpio_set_level(DAC3100_RESET_GPIO, 1);
     vTaskDelay(10 / portTICK_RATE_MS);
 
-    i2c_init();
+    ESP_LOGI(TAG, "Initializing I²C");
+    i2c_init(board_handle);
+    
+    ESP_LOGI(TAG, "Initializing LS3DH");
+    board_handle->lis3dh = lis3dh_init(board_handle->i2c_handle);
+
+    ESP_LOGI(TAG, "Initializing DAC");
+    board_handle->audio_hal = audio_board_codec_init();
+
     gpio_set_level(LED_RED_GPIO, 0);
     gpio_set_level(LED_GREEN_GPIO, 1);
-
-    board_handle = (audio_board_handle_t)audio_calloc(1, sizeof(struct audio_board_handle));
-    AUDIO_MEM_CHECK(TAG, board_handle, return NULL);
-    board_handle->audio_hal = audio_board_codec_init();
 
     return board_handle;
 }
@@ -218,7 +226,6 @@ bool audio_board_ear_big()
 {
     return gpio_get_level(EAR_BIG_GPIO) == 0;
 }
-
 
 bool audio_board_ear_small()
 {

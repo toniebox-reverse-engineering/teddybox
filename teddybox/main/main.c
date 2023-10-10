@@ -24,6 +24,7 @@
 #include "playback.h"
 #include "wifi.h"
 #include "webserver.h"
+#include "accel.h"
 
 static const char *TAG = "[TB]";
 
@@ -90,10 +91,11 @@ void app_main(void)
     dir_list("/spiflash");
 
     ESP_LOGI(TAG, "[ 2 ] Start codec chip");
-    audio_hal_ctrl_codec(board_handle->audio_hal, AUDIO_HAL_CODEC_MODE_DECODE, AUDIO_HAL_CTRL_START);
+    audio_hal_ctrl_codec(audio_board_get_hal(), AUDIO_HAL_CODEC_MODE_DECODE, AUDIO_HAL_CTRL_START);
 
     ESP_LOGI(TAG, "[ 3 ] Start handlers");
     
+    accel_init(board_handle);
     pb_init(set);
     wifi_init();
     www_init();
