@@ -199,9 +199,9 @@ int pb_toniefile_cbr(audio_element_handle_t self, char *buffer, int len, TickTyp
         {
             if (current_block < info->taf->track_page_nums[chap])
             {
-                if (info->current_chapter != chap)
+                if (info->current_chapter != chap - 1)
                 {
-                    info->current_chapter = chap;
+                    info->current_chapter = chap - 1;
                     ESP_LOGI(TAG, "Current chapter: %d", info->current_chapter);
                 }
                 break;
