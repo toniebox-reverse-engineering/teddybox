@@ -21,25 +21,29 @@ static const char *TAG = "WiFi";
 static esp_wps_config_t config = WPS_CONFIG_INIT_DEFAULT(WPS_TYPE_PBC);
 static wifi_config_t wps_ap_creds[MAX_WPS_AP_CRED];
 static int s_ap_creds_num = 0;
+static int s_ap_creds_idx = 0;
 static int s_retry_num = 0;
 static bool nvs_updated = false;
 
+static int r_ap_idx(int ap_idx) 
+{
+    return s_ap_creds_num-ap_idx-1;
+}
 static void wifi_event_handler(void *arg, esp_event_base_t event_base,
                                int32_t event_id, void *event_data)
 {
-    static int ap_idx = 0;
-
+    
     switch (event_id)
     {
     case WIFI_EVENT_STA_START:
         ESP_LOGI(TAG, "WIFI_EVENT_STA_START");
 
-        if (ap_idx < s_ap_creds_num)
+        if (s_ap_creds_idx < s_ap_creds_num)
         {
             ESP_LOGI(TAG, "Connecting to SSID: %s, Passphrase: %s",
-                     wps_ap_creds[ap_idx].sta.ssid, wps_ap_creds[ap_idx].sta.password);
-            ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &wps_ap_creds[ap_idx]));
-            ap_idx++;
+                     wps_ap_creds[r_ap_idx(s_ap_creds_idx)].sta.ssid, wps_ap_creds[r_ap_idx(s_ap_creds_idx)].sta.password);
+            ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &wps_ap_creds[r_ap_idx(s_ap_creds_idx)]));
+            s_ap_creds_idx++;
             esp_wifi_connect();
         }
         else
@@ -61,15 +65,16 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base,
             esp_wifi_connect();
             s_retry_num++;
         }
-        else if (ap_idx < s_ap_creds_num)
+        else if (s_ap_creds_idx < s_ap_creds_num)
         {
             /* Try the next AP credential if first one fails */
 
-            if (ap_idx < s_ap_creds_num)
+            if (s_ap_creds_idx < s_ap_creds_num)
             {
                 ESP_LOGI(TAG, "Connecting to SSID: %s, Passphrase: %s",
-                         wps_ap_creds[ap_idx].sta.ssid, wps_ap_creds[ap_idx].sta.password);
-                ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &wps_ap_creds[ap_idx++]));
+                         wps_ap_creds[r_ap_idx(s_ap_creds_idx)].sta.ssid, wps_ap_creds[r_ap_idx(s_ap_creds_idx)].sta.password);
+                ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &wps_ap_creds[r_ap_idx(s_ap_creds_idx)]));
+                s_ap_creds_idx++;
                 esp_wifi_connect();
             }
             s_retry_num = 0;
@@ -148,6 +153,9 @@ static void got_ip_event_handler(void *arg, esp_event_base_t event_base,
 
 void wifi_load_nvs(void)
 {
+    s_ap_creds_num = 0;
+    s_ap_creds_idx = 0;
+    
     do
     {
         nvs_handle_t nvs_handle;
@@ -157,24 +165,44 @@ void wifi_load_nvs(void)
             ESP_LOGE(TAG, "Error (%s) opening NVS handle", esp_err_to_name(err));
             break;
         }
-        size_t len = sizeof(wps_ap_creds[0].sta.ssid) - 1;
-        err = nvs_get_blob(nvs_handle, "SSID0", wps_ap_creds[0].sta.ssid, &len);
+        uint8_t index = 0;
+        err = nvs_get_u8(nvs_handle, "INDEX", &index);
         if (err != ESP_OK)
         {
-            ESP_LOGE(TAG, "Failed to read SSID (%s)", esp_err_to_name(err));
+            ESP_LOGE(TAG, "Failed to read WiFi INDEX (%s)", esp_err_to_name(err));
             nvs_close(nvs_handle);
             break;
         }
-        len = sizeof(wps_ap_creds[0].sta.password) - 1;
-        err = nvs_get_blob(nvs_handle, "PW0", wps_ap_creds[0].sta.password, &len);
-        if (err != ESP_OK)
-        {
-            ESP_LOGE(TAG, "Failed to read PW (%s)", esp_err_to_name(err));
-            nvs_close(nvs_handle);
-            break;
+
+        if (index > MAX_WPS_AP_CRED) {
+            ESP_LOGE(TAG, "WiFi INDEX too high %i (%s)", index, esp_err_to_name(err));
+            index = MAX_WPS_AP_CRED;
         }
-        ESP_LOGI(TAG, "SSID: '%s' PW:'%s'", wps_ap_creds[0].sta.ssid, wps_ap_creds[0].sta.password);
-        s_ap_creds_num = 1;
+        for (size_t i=0; i<index; i++)
+        {
+            char *ssid = "SSID+";
+            char *pw = "PW+";
+            ssid[4] = 0x30 + i;
+            pw[2] = 0x30 + i;
+
+            size_t len = sizeof(wps_ap_creds[i].sta.ssid) - 1;
+            err = nvs_get_blob(nvs_handle, ssid, wps_ap_creds[i].sta.ssid, &len);
+            if (err != ESP_OK)
+            {
+                ESP_LOGE(TAG, "Failed to read SSID (%s)", esp_err_to_name(err));
+                break;
+            }
+            len = sizeof(wps_ap_creds[i].sta.password) - 1;
+            err = nvs_get_blob(nvs_handle, pw, wps_ap_creds[i].sta.password, &len);
+            if (err != ESP_OK)
+            {
+                ESP_LOGE(TAG, "Failed to read PW (%s)", esp_err_to_name(err));
+                break;
+            }
+            ESP_LOGI(TAG, "SSID: '%s' PW:'%s'", wps_ap_creds[i].sta.ssid, wps_ap_creds[i].sta.password);
+            
+            s_ap_creds_num++;
+        }
         nvs_updated = false;
 
         nvs_close(nvs_handle);
