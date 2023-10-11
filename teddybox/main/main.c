@@ -27,23 +27,10 @@
 #include "accel.h"
 
 static const char *TAG = "[TB]";
-
 static wl_handle_t s_test_wl_handle;
+
+
 void dir_list(const char *path)
-{
-    DIR *dir = opendir(path);
-    while (true)
-    {
-        struct dirent *de = readdir(dir);
-        if (!de)
-        {
-            break;
-        }
-        ESP_LOGI(TAG, "  - %s", de->d_name);
-    }
-    closedir(dir);
-}
-void dir_play(const char *path)
 {
     DIR *dir = opendir(path);
     while (true)
@@ -100,13 +87,14 @@ void app_main(void)
     wifi_init();
     www_init();
 
-    int volume = 10;
+    int volume = 30;
     audio_hal_set_volume(audio_board_get_hal(), volume);
 
     ESP_LOGI(TAG, "[ 4 ] play startup sound");
 
     pb_play_default(CONTENT_DEFAULT_STARTUP);
     vTaskDelay(5000 / portTICK_PERIOD_MS);
+
 
     ESP_LOGI(TAG, "[ 5 ] play audio");
     if(pb_play_content(0x07BAC90F) != ESP_OK)
@@ -126,22 +114,26 @@ void app_main(void)
 
         if (ear_big && !ear_big_prev)
         {
+            pb_seek(10);
+            /*
             if (volume < 100)
             {
                 ESP_LOGI(TAG, "Volume up");
                 volume += 10;
                 audio_hal_set_volume(audio_board_get_hal(), volume);
-            }
+            }*/
         }
 
         if (ear_small && !ear_small_prev)
         {
+            pb_seek(-10);
+            /*
             if (volume >= 10)
             {
                 ESP_LOGI(TAG, "Volume down");
                 volume -= 10;
                 audio_hal_set_volume(audio_board_get_hal(), volume);
-            }
+            }*/
         }
 
         ear_big_prev = ear_big;

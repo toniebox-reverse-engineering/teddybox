@@ -33,9 +33,19 @@
 #define CONTENT_DEFAULT_CODE_OWL 0x00000017
 #define CONTENT_DEFAULT_CODE_ELEPHANT 0x00000018
 
+
+#define TONIEFILE_FRAME_SIZE 4096
+#define TONIEFILE_MAX_CHAPTERS 100
+#define TONIEFILE_PAD_END 64
+
+
 void pb_init(esp_periph_set_handle_t set);
 void pb_mainthread(void *arg);
 void pb_deinit(void);
+esp_err_t pb_seek(int32_t blocks);
+esp_err_t pb_seek_chapter(int32_t chapters);
+esp_err_t pb_set_chapter(int32_t chapter);
+int32_t pb_get_chapter(void);
 
 esp_err_t pb_play(const char *uri);
 esp_err_t pb_play_default_lang(uint32_t lang, uint32_t id);
