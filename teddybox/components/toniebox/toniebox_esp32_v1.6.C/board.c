@@ -76,8 +76,6 @@ static esp_err_t spi_init(audio_board_handle_t board)
         .miso_io_num = SPI_MISO_GPIO,
         .mosi_io_num = SPI_MOSI_GPIO,
         .sclk_io_num = SPI_SCLK_GPIO,
-        .quadwp_io_num = -1,
-        .quadhd_io_num = -1,
         .max_transfer_sz = 64};
 
     board->spi_dev = SPI2_HOST;
@@ -108,7 +106,6 @@ audio_board_handle_t audio_board_init(void)
     io_conf.pull_down_en = 0;
     io_conf.pull_up_en = 0;
     gpio_config(&io_conf);
-
 
     io_conf.mode = GPIO_MODE_INPUT;
     io_conf.pin_bit_mask = BIT64(EAR_BIG_GPIO) | BIT64(EAR_SMALL_GPIO);

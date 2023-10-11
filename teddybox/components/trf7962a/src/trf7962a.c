@@ -24,7 +24,7 @@ esp_err_t trf7962a_get_reg(trf7962a_t ctx, uint8_t reg, uint8_t *val)
     gpio_set_level(ctx->ss_gpio, 0);
 
     t.flags = SPI_TRANS_USE_TXDATA | SPI_TRANS_USE_RXDATA;
-    t.length = 1;
+    t.length = 8;
 
     t.tx_data[0] = (reg & 0b00011111) | (uint8_t)REGISTER_B7 | (uint8_t)READ_B6;
     ret = spi_device_polling_transmit(ctx->spi_handle_write, &t);
@@ -33,14 +33,14 @@ esp_err_t trf7962a_get_reg(trf7962a_t ctx, uint8_t reg, uint8_t *val)
         ESP_LOGE(TAG, "Failed: %d", ret);
     }
 
-    t.tx_data[0] = 0;
-    t.rx_data[0] = 0;
+    t.tx_data[0] = 0x00;
+    t.rx_data[0] = 0x00;
     ret = spi_device_polling_transmit(ctx->spi_handle_read, &t);
     if (ret != ESP_OK)
     {
         ESP_LOGE(TAG, "Failed: %d", ret);
     }
-
+    
     gpio_set_level(ctx->ss_gpio, 1);
 
     *val = t.rx_data[0];
@@ -54,7 +54,7 @@ esp_err_t trf7962a_set_reg(trf7962a_t ctx, uint8_t reg, uint8_t val)
 
     memset(&t, 0, sizeof(t));
     t.flags |= SPI_TRANS_USE_TXDATA | SPI_TRANS_USE_RXDATA;
-    t.length = 2;
+    t.length = 16;
     t.tx_data[0] = (reg & 0b00011111) | (uint8_t)REGISTER_B7 | (uint8_t)WRITE_B6;
     t.tx_data[1] = val;
 
@@ -76,7 +76,7 @@ esp_err_t trf7962a_command(trf7962a_t ctx, uint8_t cmd)
 
     memset(&t, 0, sizeof(t));
     t.flags |= SPI_TRANS_USE_TXDATA | SPI_TRANS_USE_RXDATA;
-    t.length = 2;
+    t.length = 16;
     t.tx_data[0] = (cmd & 0b00011111) | (uint8_t)COMMAND_B7 | (uint8_t)WRITE_B6;
     t.tx_data[1] = 0;
 
@@ -98,8 +98,7 @@ void trf7962a_dump_regs(trf7962a_t ctx)
     for (int reg = 0; reg < 0x20; reg++)
     {
         uint8_t val = 0;
-        /* test - set registers to unusual values */
-        trf7962a_set_reg(ctx, reg, ~reg);
+        
         trf7962a_get_reg(ctx, reg, &val);
         ESP_LOGI(TAG, "   0x%02X: 0x%02X", reg, val);
     }
