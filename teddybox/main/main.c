@@ -114,26 +114,22 @@ void app_main(void)
 
         if (ear_big && !ear_big_prev)
         {
-            pb_seek(10);
-            /*
             if (volume < 100)
             {
                 ESP_LOGI(TAG, "Volume up");
                 volume += 10;
                 audio_hal_set_volume(audio_board_get_hal(), volume);
-            }*/
+            }
         }
 
         if (ear_small && !ear_small_prev)
         {
-            pb_seek(-10);
-            /*
             if (volume >= 10)
             {
                 ESP_LOGI(TAG, "Volume down");
                 volume -= 10;
                 audio_hal_set_volume(audio_board_get_hal(), volume);
-            }*/
+            }
         }
 
         ear_big_prev = ear_big;
