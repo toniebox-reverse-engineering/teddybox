@@ -29,6 +29,8 @@
 #include "periph_sdcard.h"
 #include "periph_lcd.h"
 #include "periph_adc_button.h"
+#include "esp_sleep.h"
+
 #include "dac3100.h"
 #include "driver/gpio.h"
 #include "lis3dh.h"
@@ -85,6 +87,24 @@ static esp_err_t spi_init(audio_board_handle_t board)
     return ret;
 }
 
+static QueueHandle_t gpio_evt_queue = NULL;
+
+void headset_isr(void *ctx)
+{
+    uint32_t value = 0;
+    xQueueSendFromISR(gpio_evt_queue, &value, NULL);
+}
+
+bool board_headset_irq()
+{
+    uint32_t io_num;
+    if (xQueueReceive(gpio_evt_queue, &io_num, 0))
+    {
+        return true;
+    }
+    return false;
+}
+
 audio_board_handle_t audio_board_init(void)
 {
     if (board_handle)
@@ -97,18 +117,22 @@ audio_board_handle_t audio_board_init(void)
 
     ESP_LOGI(TAG, "Initializing GPIO");
     gpio_config_t io_conf = {0};
+    gpio_evt_queue = xQueueCreate(10, sizeof(uint32_t));
 
     io_conf.mode = GPIO_MODE_OUTPUT;
-    io_conf.pin_bit_mask = 
-        BIT64(LED_BLUE_GPIO) | BIT64(LED_GREEN_GPIO) | BIT64(LED_RED_GPIO) | 
-        BIT64(POWER_GPIO) | BIT64(SD_POWER_GPIO) | BIT64(DAC3100_RESET_GPIO) | 
+    io_conf.pin_bit_mask =
+        BIT64(LED_BLUE_GPIO) | BIT64(LED_GREEN_GPIO) | BIT64(LED_RED_GPIO) |
+        BIT64(POWER_GPIO) | BIT64(SD_POWER_GPIO) | BIT64(DAC3100_RESET_GPIO) |
         BIT64(SPI_SS_GPIO);
     io_conf.pull_down_en = 0;
     io_conf.pull_up_en = 0;
     gpio_config(&io_conf);
 
     io_conf.mode = GPIO_MODE_INPUT;
-    io_conf.pin_bit_mask = BIT64(EAR_BIG_GPIO) | BIT64(EAR_SMALL_GPIO);
+    io_conf.pin_bit_mask =
+        BIT64(GPIO_NUM_0) | BIT64(EAR_BIG_GPIO) | BIT64(EAR_SMALL_GPIO) |
+        BIT64(HEADPHONE_DETECT) | BIT64(TRF7962A_IRQ_GPIO) | BIT64(LIS3DH_IRQ_GPIO) |
+        BIT64(WAKEUP_GPIO);
     io_conf.pull_down_en = 0;
     io_conf.pull_up_en = 1;
     gpio_config(&io_conf);
@@ -144,6 +168,21 @@ audio_board_handle_t audio_board_init(void)
 
     ESP_LOGI(TAG, "  - DAC3100");
     board_handle->audio_hal = audio_board_codec_init();
+
+    /* Configure wakeup. not used yet. */
+    gpio_wakeup_enable(GPIO_NUM_0, GPIO_INTR_NEGEDGE);
+    gpio_wakeup_enable(WAKEUP_GPIO, GPIO_INTR_POSEDGE);
+    gpio_wakeup_enable(TRF7962A_IRQ_GPIO, GPIO_INTR_POSEDGE);
+    gpio_wakeup_enable(LIS3DH_IRQ_GPIO, GPIO_INTR_POSEDGE);
+
+    /* setup ISRs for INT lines */
+    gpio_install_isr_service(ESP_INTR_FLAG_SHARED);
+    gpio_isr_handler_add(HEADPHONE_DETECT, headset_isr, NULL);
+    gpio_set_intr_type(HEADPHONE_DETECT, GPIO_INTR_POSEDGE);
+    gpio_intr_enable(HEADPHONE_DETECT);
+
+    /* not used yet */
+    esp_sleep_enable_gpio_wakeup();
 
     gpio_set_level(LED_RED_GPIO, 0);
     gpio_set_level(LED_GREEN_GPIO, 1);

@@ -9,6 +9,9 @@
 #include <string.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+
+#include "soc/rtc_cntl_reg.h"
+
 #include "esp_log.h"
 #include "nvs_flash.h"
 #include "sdkconfig.h"
@@ -17,6 +20,7 @@
 #include "wear_levelling.h"
 #include "esp_partition.h"
 #include "esp_event.h"
+#include "esp_sleep.h"
 
 #include "esp_peripherals.h"
 #include "periph_sdcard.h"
@@ -25,10 +29,10 @@
 #include "wifi.h"
 #include "webserver.h"
 #include "accel.h"
+#include "dac3100.h"
 
 static const char *TAG = "[TB]";
 static wl_handle_t s_test_wl_handle;
-
 
 void dir_list(const char *path)
 {
@@ -49,11 +53,12 @@ void app_main(void)
 {
     /* Initialize NVS — it is used to store PHY calibration data */
     esp_err_t ret = nvs_flash_init();
-    if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
+    if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND)
+    {
         ESP_ERROR_CHECK(nvs_flash_erase());
         ret = nvs_flash_init();
     }
-    ESP_ERROR_CHECK( ret );
+    ESP_ERROR_CHECK(ret);
 
     esp_log_level_set("*", ESP_LOG_INFO);
     esp_log_level_set(TAG, ESP_LOG_INFO);
@@ -81,7 +86,7 @@ void app_main(void)
     audio_hal_ctrl_codec(audio_board_get_hal(), AUDIO_HAL_CODEC_MODE_DECODE, AUDIO_HAL_CTRL_START);
 
     ESP_LOGI(TAG, "[ 3 ] Start handlers");
-    
+
     accel_init(board_handle);
     pb_init(set);
     wifi_init();
@@ -90,24 +95,36 @@ void app_main(void)
     int volume = 30;
     audio_hal_set_volume(audio_board_get_hal(), volume);
 
-    ESP_LOGI(TAG, "[ 4 ] play startup sound");
+    ESP_LOGI(TAG, "[ 4 ] detect headset");
+    dac3100_set_mute(dac3100_headset_detected());
 
+    ESP_LOGI(TAG, "[ 5 ] play startup sound");
     pb_play_default(CONTENT_DEFAULT_STARTUP);
-    vTaskDelay(5000 / portTICK_PERIOD_MS);
-
-
-    ESP_LOGI(TAG, "[ 5 ] play audio");
-    if(pb_play_content(0x07BAC90F) != ESP_OK)
-    {
-        pb_play_default(CONTENT_DEFAULT_CODE_KOALA);
-    }
 
     bool ear_big_prev = false;
     bool ear_small_prev = false;
+    bool autostart = true;
 
     while (1)
     {
         vTaskDelay(100 / portTICK_PERIOD_MS);
+
+        if (board_headset_irq())
+        {
+            uint8_t type = dac3100_headset_detected();
+            ESP_LOGI(TAG, "Headset detected: %s", type ? "YES" : "NO");
+            dac3100_set_mute(type);
+        }
+
+        if (esp_timer_get_time() > 6000000 && autostart)
+        {
+            autostart = false;
+            ESP_LOGI(TAG, "[ 6 ] play audio");
+            if (pb_play_content(0x07BAC90F) != ESP_OK)
+            {
+                pb_play_default(CONTENT_DEFAULT_CODE_KOALA);
+            }
+        }
 
         bool ear_big = audio_board_ear_big();
         bool ear_small = audio_board_ear_small();
@@ -119,6 +136,12 @@ void app_main(void)
                 ESP_LOGI(TAG, "Volume up");
                 volume += 10;
                 audio_hal_set_volume(audio_board_get_hal(), volume);
+                dac3100_beep(0, 0x140);
+            }
+            else
+            {
+                ESP_LOGI(TAG, "Volume up (limit)");
+                dac3100_beep(1, 0x140);
             }
         }
 
@@ -129,6 +152,13 @@ void app_main(void)
                 ESP_LOGI(TAG, "Volume down");
                 volume -= 10;
                 audio_hal_set_volume(audio_board_get_hal(), volume);
+                dac3100_beep(2, 0x140);
+            }
+            else
+            {
+
+                ESP_LOGI(TAG, "Volume down (limit)");
+                dac3100_beep(3, 0x140);
             }
         }
 

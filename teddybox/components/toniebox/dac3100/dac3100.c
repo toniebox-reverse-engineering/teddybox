@@ -38,6 +38,43 @@ static i2c_bus_handle_t i2c_handle;
 static uint8_t reg_cache[14][256];
 static uint8_t reg_page = 0;
 
+uint16_t ofwButtonFreqTable[5][4][2] = {
+    {
+        // 16000
+        {0x278A, 0x79BD}, //+
+        {0x30F9, 0x763F}, //++
+        {0x18F5, 0x7D87}, //-
+        {0x0F0A, 0x7F1A}  //--
+    },
+    {
+        // 22050
+        {0x1CEA, 0x7CB1}, //+
+        {0x23F9, 0x7AD5}, //++
+        {0x122A, 0x7EB2}, //-
+        {0x0AED, 0x7F87}  //--
+    },
+    {
+        // 32000
+        {0x1404, 0x7E6D}, //+
+        {0x18F7, 0x7D8A}, //++
+        {0x0C8A, 0x7F61}, //-
+        {0x0788, 0x7FC7}  //--
+    },
+    {
+        // 44100
+        {0x0E8D, 0x7F2B}, //+
+        {0x122C, 0x7EB4}, //++
+        {0x091B, 0x7FAC}, //-
+        {0x0578, 0x7FE2}  //--
+    },
+    {
+        // 48000
+        {0x0D60, 0x7F4D}, //+
+        {0x10B4, 0x7EE7}, //++
+        {0x085E, 0x7FB9}, //-
+        {0x0506, 0x7FE6}  //--
+    }};
+
 audio_hal_func_t AUDIO_CODEC_DAC3100_DEFAULT_HANDLE = {
     .audio_codec_initialize = dac3100_init,
     .audio_codec_deinitialize = dac3100_deinit,
@@ -106,6 +143,53 @@ void dac3100_read_all()
     }
 }
 
+esp_err_t dac3100_dump_reg(enum PAGE page, uint8_t reg)
+{
+    uint8_t val = 0;
+    dac3100_write_reg(PAGE_CONTROL, page);
+    esp_err_t ret = dac3100_read_reg(reg, &val);
+    ESP_LOGW(TAG, "  %x: %x", reg, val);
+
+    return ret;
+}
+
+uint8_t dac3100_headset_detected()
+{
+    uint8_t val = 0;
+    dac3100_write_reg(PAGE_CONTROL, SERIAL_IO);
+    /* reset flags  */
+    dac3100_read_reg(DAC_INTR_FLAGS, &val);
+    dac3100_read_reg(HEADSET_DETECT, &val);
+
+    return (val >> 5) & 0x03;
+}
+
+esp_err_t dac3100_beep_generate(uint16_t sin, uint16_t cos, uint32_t length)
+{
+    dac3100_write_reg(PAGE_CONTROL, SERIAL_IO);
+
+    dac3100_write_reg(BEEP_LEN_MSB, length >> 16);
+    dac3100_write_reg(BEEP_LEN_MID, length >> 8);
+    dac3100_write_reg(BEEP_LEN_LSB, length);
+
+    dac3100_write_reg(BEEP_SIN_MSB, sin >> 8);
+    dac3100_write_reg(BEEP_SIN_LSB, sin);
+
+    dac3100_write_reg(BEEP_COS_MSB, cos >> 8);
+    dac3100_write_reg(BEEP_COS_LSB, cos);
+
+    dac3100_write_reg(BEEP_L_GEN, 0x80);
+
+    return ESP_OK;
+}
+
+esp_err_t dac3100_beep(uint16_t index, uint32_t length)
+{
+    uint16_t(*pBeep)[2] = ofwButtonFreqTable[4];
+
+    return dac3100_beep_generate(pBeep[index][0], pBeep[index][1], length);
+}
+
 esp_err_t dac3100_init(audio_hal_codec_config_t *cfg)
 {
     ESP_LOGI(TAG, "dac3100 init");
@@ -117,27 +201,27 @@ esp_err_t dac3100_init(audio_hal_codec_config_t *cfg)
     dac3100_write_reg(PAGE_CONTROL, SERIAL_IO);
     dac3100_write_reg(SOFTWARE_RESET, 0x01);
     dac3100_write_reg(CLOCKGEN_MUX, 0x07);
-    //dac3100_write_reg(PLL_J_VAL, 0x08);
-    //dac3100_write_reg(PLL_D_VAL_MSB, 0x00);
-    //dac3100_write_reg(PLL_D_VAL_LSB, 0x00);
-    //dac3100_write_reg(PLL_P_R_VAL, 0x91);
-    //dac3100_write_reg(DAC_NDAC_VAL, 0x88);
-    //dac3100_write_reg(DAC_MDAC_VAL, 0x82);
-    //dac3100_write_reg(DAC_DOSR_VAL_MSB, 0x00);
-    //dac3100_write_reg(DAC_DOSR_VAL_LSB, 0x80);
-    //dac3100_write_reg(CODEC_IF_CTRL1, 0x00);
-    //dac3100_write_reg(DAC_PROC_BLOCK_SEL, 0x0B);
+    // dac3100_write_reg(PLL_J_VAL, 0x08);
+    // dac3100_write_reg(PLL_D_VAL_MSB, 0x00);
+    // dac3100_write_reg(PLL_D_VAL_LSB, 0x00);
+    // dac3100_write_reg(PLL_P_R_VAL, 0x91);
+    // dac3100_write_reg(DAC_NDAC_VAL, 0x88);
+    // dac3100_write_reg(DAC_MDAC_VAL, 0x82);
+    // dac3100_write_reg(DAC_DOSR_VAL_MSB, 0x00);
+    // dac3100_write_reg(DAC_DOSR_VAL_LSB, 0x80);
+    // dac3100_write_reg(CODEC_IF_CTRL1, 0x00);
+    // dac3100_write_reg(DAC_PROC_BLOCK_SEL, 0x0B);
 
-    //dac3100_write_reg(PAGE_CONTROL, DAC_FILTER_DRC_COE_1A);
-    //dac3100_write_reg(0x01, 0x04);
+    // dac3100_write_reg(PAGE_CONTROL, DAC_FILTER_DRC_COE_1A);
+    // dac3100_write_reg(0x01, 0x04);
 
-    //dac3100_write_reg(PAGE_CONTROL, SERIAL_IO);
-    //dac3100_write_reg(VOL_MICDET_SAR_ADC, 0x00);
+    // dac3100_write_reg(PAGE_CONTROL, SERIAL_IO);
+    // dac3100_write_reg(VOL_MICDET_SAR_ADC, 0x00);
 
     dac3100_write_reg(PAGE_CONTROL, DAC_OUT_VOL);
     dac3100_write_reg(HP_DRIVERS, 0x04);
-    //dac3100_write_reg(HP_OUT_POP_REM_SET, 0x4E);
-    //dac3100_write_reg(DAC_LR_OUT_MIX_ROUTING, 0x44);
+    // dac3100_write_reg(HP_OUT_POP_REM_SET, 0x4E);
+    // dac3100_write_reg(DAC_LR_OUT_MIX_ROUTING, 0x44);
     dac3100_write_reg(HPL_DRIVER, 0x06);
     dac3100_write_reg(HPR_DRIVER, 0x06);
     dac3100_write_reg(SPK_DRIVER, 0x1C);
@@ -147,9 +231,9 @@ esp_err_t dac3100_init(audio_hal_codec_config_t *cfg)
     dac3100_write_reg(R_VOL_TO_HPR, 0x92);
     dac3100_write_reg(L_VOL_TO_SPK, 0x92);
 
-    //dac3100_write_reg(PAGE_CONTROL, SERIAL_IO);
-    //dac3100_write_reg(DAC_DATA_PATH_SETUP, 0xD4);
-    //dac3100_write_reg(DAC_VOL_CTRL, 0x00);
+    // dac3100_write_reg(PAGE_CONTROL, SERIAL_IO);
+    // dac3100_write_reg(DAC_DATA_PATH_SETUP, 0xD4);
+    // dac3100_write_reg(DAC_VOL_CTRL, 0x00);
 
     /* https://github.com/toniebox-reverse-engineering/RvX_TLV320DAC3100/blob/master/RvX_TLV320DAC3100.cpp */
     dac3100_write_reg(PAGE_CONTROL, SERIAL_IO);
@@ -226,13 +310,13 @@ esp_err_t dac3100_init(audio_hal_codec_config_t *cfg)
     dac3100_write_reg(DAC_VOL_L_CTRL, 0xDC);
     dac3100_write_reg(DAC_VOL_R_CTRL, 0xDC);
 
-    //dac3100_write_reg(PAGE_CONTROL, DAC_OUT_VOL);
-    //dac3100_write_reg(L_VOL_TO_SPK, 0x80);
-
+    // dac3100_write_reg(PAGE_CONTROL, DAC_OUT_VOL);
+    // dac3100_write_reg(L_VOL_TO_SPK, 0x80);
     dac3100_write_reg(DAC_VOL_CTRL, 0x00);
 
     dac3100_set_gain(3);
-    dac3100_set_mute(false);
+    dac3100_set_mute(true);
+
 
     return ESP_OK;
 }
@@ -274,10 +358,13 @@ esp_err_t dac3100_set_volume(int volume)
 {
     int value = -635 + (volume * 635 / 100);
     uint8_t reg_val = value / 5;
+    int beep_value = ((100 - volume) * 0x3F / 100);
+    uint8_t reg_beep = beep_value & 0x3F;
 
     dac3100_write_reg(PAGE_CONTROL, SERIAL_IO);
     dac3100_write_reg(DAC_VOL_L_CTRL, reg_val);
     dac3100_write_reg(DAC_VOL_R_CTRL, reg_val);
+    dac3100_write_reg(BEEP_R_GEN, 0x40 | (reg_beep));
     return ESP_OK;
 }
 

@@ -137,6 +137,7 @@ esp_err_t audio_board_deinit(audio_board_handle_t audio_board);
 
 bool audio_board_ear_big(void);
 bool audio_board_ear_small(void);
+bool board_headset_irq(void);
 
 #ifdef __cplusplus
 }
