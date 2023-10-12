@@ -86,6 +86,8 @@ esp_err_t pb_toniefile_open(pb_toniefile_t *info, const char *filepath)
 {
     ESP_LOGI(TAG, "Open Toniefile: %s", filepath);
 
+    memset(info, 0x00, sizeof(pb_toniefile_t));
+
     info->fd = fopen(filepath, "r");
     if (!info->fd)
     {
@@ -119,11 +121,21 @@ esp_err_t pb_toniefile_open(pb_toniefile_t *info, const char *filepath)
     return ESP_OK;
 }
 
+void pb_toniefile_close(pb_toniefile_t *info)
+{
+    FILE *fd = info->fd;
+    info->valid = false;
+    info->fd = NULL;
+    fclose(fd);
+    toniebox_audio_file_header__free_unpacked(info->taf, NULL);
+    info->taf = NULL;
+}
+
 int pb_toniefile_cbr(audio_element_handle_t self, char *buffer, int len, TickType_t ticks_to_wait, void *context)
 {
     pb_toniefile_t *info = (pb_toniefile_t *)context;
 
-    if (!info || !info->fd)
+    if (!info || !info->valid || !info->fd)
     {
         ESP_LOGE(TAG, "Playback already finished, but was called again");
         return AEL_IO_DONE;
@@ -218,19 +230,13 @@ int pb_toniefile_cbr(audio_element_handle_t self, char *buffer, int len, TickTyp
     else if (bytes_read == 0)
     {
         ESP_LOGI(TAG, "Playback finished, cleaning up");
-        fclose(info->fd);
-        info->fd = NULL;
-        toniebox_audio_file_header__free_unpacked(info->taf, NULL);
-        info->valid = false;
+        pb_toniefile_close(info);
         return AEL_IO_DONE;
     }
     else
     {
         ESP_LOGI(TAG, "Reading failed, cleaning up");
-        fclose(info->fd);
-        info->fd = NULL;
-        toniebox_audio_file_header__free_unpacked(info->taf, NULL);
-        info->valid = false;
+        pb_toniefile_close(info);
         return AEL_IO_DONE;
     }
 
@@ -402,11 +408,12 @@ void pb_mainthread(void *arg)
             ESP_LOGI(TAG, "[ * ] Set up uri: '%s'", item);
             if (playing)
             {
+                audio_pipeline_pause(pipeline);
                 audio_pipeline_stop(pipeline);
                 audio_pipeline_wait_for_stop(pipeline);
-                audio_pipeline_reset_ringbuffer(pipeline);
-                audio_pipeline_reset_elements(pipeline);
-                audio_pipeline_change_state(pipeline, AEL_STATE_INIT);
+                audio_pipeline_terminate(pipeline);
+
+                pb_toniefile_close(&pb_toniefile_info);
                 playing = false;
             }
 
@@ -417,6 +424,7 @@ void pb_mainthread(void *arg)
             else
             {
                 audio_pipeline_run(pipeline);
+                audio_pipeline_resume(pipeline);
             }
             free(item);
         }
@@ -425,19 +433,25 @@ void pb_mainthread(void *arg)
         {
             switch (msg.source_type)
             {
+            default:
+                ESP_LOGI(TAG, "[ * ] Receive info from %d", msg.source_type);
+                break;
             case AUDIO_ELEMENT_TYPE_ELEMENT:
             {
                 if (msg.cmd == AEL_MSG_CMD_REPORT_MUSIC_INFO)
                 {
                     // msg.source == (void *)music_decoder &&
                     audio_element_info_t music_info = {0};
-                    audio_element_getinfo(music_decoder, &music_info);
-
-                    ESP_LOGI(TAG, "[ * ] Receive music info from decoder, sample_rates=%d, bits=%d, ch=%d",
-                             music_info.sample_rates, music_info.bits, music_info.channels);
-
-                    audio_element_setinfo(i2s_stream_writer, &music_info);
-                    i2s_stream_set_clk(i2s_stream_writer, music_info.sample_rates, music_info.bits, music_info.channels);
+                    if (audio_element_getinfo(music_decoder, &music_info) == ESP_OK)
+                    {
+                        ESP_LOGI(TAG, "[ * ] Receive music info from decoder, sample_rates=%d, bits=%d, ch=%d",
+                                 music_info.sample_rates, music_info.bits, music_info.channels);
+                        audio_element_setinfo(i2s_stream_writer, &music_info);
+                        if (i2s_stream_set_clk(i2s_stream_writer, music_info.sample_rates, music_info.bits, music_info.channels) != ESP_OK)
+                        {
+                            ESP_LOGE(TAG, "Failed to set I²S rate");
+                        }
+                    }
                 }
                 else if (msg.cmd == AEL_MSG_CMD_REPORT_STATUS)
                 {
