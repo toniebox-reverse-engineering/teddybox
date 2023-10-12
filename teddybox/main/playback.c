@@ -471,19 +471,19 @@ void pb_mainthread(void *arg)
                     case AEL_STATUS_STATE_PAUSED:
                         ESP_LOGW(TAG, "[Event] [%s] Pause", source);
                         playing = true;
-                        gpio_set_level(LED_BLUE_GPIO, 1);
+                        led_set_rgb(0, 50, 50);
                         break;
                     case AEL_STATUS_STATE_RUNNING:
                         ESP_LOGW(TAG, "[Event] [%s] Run", source);
                         playing = true;
-                        gpio_set_level(LED_BLUE_GPIO, 1);
+                        led_set_rgb(0, 50, 100);
                         break;
                     case AEL_STATUS_STATE_STOPPED:
                     case AEL_STATUS_STATE_FINISHED:
                         ESP_LOGW(TAG, "[Event] [%s] Stop", source);
                         if (msg.source == (void *)i2s_stream_writer)
                         {
-                            gpio_set_level(LED_BLUE_GPIO, 0);
+                            led_set_rgb(0, 100, 0);
                             playing = false;
                             audio_pipeline_reset_ringbuffer(pipeline);
                             audio_pipeline_reset_elements(pipeline);

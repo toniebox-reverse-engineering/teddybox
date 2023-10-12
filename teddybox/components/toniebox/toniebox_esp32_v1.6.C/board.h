@@ -36,6 +36,7 @@
 #include "i2c_bus.h"
 #include "lis3dh.h"
 #include "trf7962a.h"
+#include "led.h"
 
 #ifdef __cplusplus
 extern "C" {

@@ -35,6 +35,7 @@
 #include "driver/gpio.h"
 #include "lis3dh.h"
 #include "trf7962a.h"
+#include "led.h"
 
 static const char *TAG = "TB-ESP32";
 
@@ -138,13 +139,11 @@ audio_board_handle_t audio_board_init(void)
     gpio_config(&io_conf);
 
     /* set LED to default states */
-    gpio_set_level(LED_BLUE_GPIO, 0);
-    gpio_set_level(LED_GREEN_GPIO, 0);
-    gpio_set_level(LED_RED_GPIO, 0);
+    led_init();
+    led_set_rgb(20, 20, 20);
 
     /* init peripherals */
     ESP_LOGI(TAG, "Initializing Peripherals");
-    gpio_set_level(LED_RED_GPIO, 1);
 
     gpio_set_level(POWER_GPIO, 1);
     gpio_set_level(SD_POWER_GPIO, 0);
@@ -183,9 +182,8 @@ audio_board_handle_t audio_board_init(void)
 
     /* not used yet */
     esp_sleep_enable_gpio_wakeup();
-
-    gpio_set_level(LED_RED_GPIO, 0);
-    gpio_set_level(LED_GREEN_GPIO, 1);
+    
+    led_set_rgb(0, 100, 0);
 
     return board_handle;
 }
