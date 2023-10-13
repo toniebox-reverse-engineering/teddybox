@@ -247,7 +247,7 @@ void wifi_save_nvs(void)
 
 void wifi_init(void)
 {
-    esp_log_level_set(TAG, ESP_LOG_INFO);
+    esp_log_level_set(TAG, ESP_LOG_WARN);
 
     wifi_load_nvs();
 

@@ -30,6 +30,7 @@
 #include "webserver.h"
 #include "accel.h"
 #include "dac3100.h"
+#include "nfc.h"
 
 static const char *TAG = "[TB]";
 static wl_handle_t s_test_wl_handle;
@@ -60,7 +61,7 @@ void app_main(void)
     }
     ESP_ERROR_CHECK(ret);
 
-    esp_log_level_set("*", ESP_LOG_INFO);
+    esp_log_level_set("*", ESP_LOG_WARN);
     esp_log_level_set(TAG, ESP_LOG_INFO);
 
     esp_periph_config_t periph_cfg = DEFAULT_ESP_PERIPH_SET_CONFIG();
@@ -91,6 +92,7 @@ void app_main(void)
     pb_init(set);
     wifi_init();
     www_init();
+    nfc_init();
 
     int volume = 30;
     audio_hal_set_volume(audio_board_get_hal(), volume);
@@ -115,7 +117,7 @@ void app_main(void)
             ESP_LOGI(TAG, "Headset detected: %s", type ? "YES" : "NO");
             dac3100_set_mute(type);
         }
-
+/*
         if (esp_timer_get_time() > 6000000 && autostart)
         {
             autostart = false;
@@ -124,7 +126,7 @@ void app_main(void)
             {
                 pb_play_default(CONTENT_DEFAULT_CODE_KOALA);
             }
-        }
+        }*/
 
         bool ear_big = audio_board_ear_big();
         bool ear_small = audio_board_ear_small();

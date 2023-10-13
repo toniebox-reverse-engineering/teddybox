@@ -10,6 +10,8 @@ static const char *TAG = "LED";
 
 void led_init(void)
 {
+    esp_log_level_set(TAG, ESP_LOG_INFO);
+    
     mcpwm_gpio_init(MCPWM_UNIT_0, MCPWM0A, LED_RED_GPIO);
     mcpwm_gpio_init(MCPWM_UNIT_0, MCPWM1A, LED_GREEN_GPIO);
     mcpwm_gpio_init(MCPWM_UNIT_0, MCPWM2A, LED_BLUE_GPIO);

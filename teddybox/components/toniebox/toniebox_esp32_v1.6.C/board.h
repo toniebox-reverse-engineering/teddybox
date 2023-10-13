@@ -125,6 +125,8 @@ audio_board_handle_t audio_board_get_handle(void);
 
 audio_hal_handle_t audio_board_get_hal(void);
 
+trf7962a_t audio_board_get_trf(void);
+
 /**
  * @brief Uninitialize the audio board
  *

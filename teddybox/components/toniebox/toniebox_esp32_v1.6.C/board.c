@@ -168,17 +168,14 @@ audio_board_handle_t audio_board_init(void)
     ESP_LOGI(TAG, "  - DAC3100");
     board_handle->audio_hal = audio_board_codec_init();
 
-    /* Configure wakeup. not used yet. */
-    gpio_wakeup_enable(GPIO_NUM_0, GPIO_INTR_NEGEDGE);
-    gpio_wakeup_enable(WAKEUP_GPIO, GPIO_INTR_POSEDGE);
-    gpio_wakeup_enable(TRF7962A_IRQ_GPIO, GPIO_INTR_POSEDGE);
-    gpio_wakeup_enable(LIS3DH_IRQ_GPIO, GPIO_INTR_POSEDGE);
-
     /* setup ISRs for INT lines */
-    gpio_install_isr_service(ESP_INTR_FLAG_SHARED);
     gpio_isr_handler_add(HEADPHONE_DETECT, headset_isr, NULL);
     gpio_set_intr_type(HEADPHONE_DETECT, GPIO_INTR_POSEDGE);
     gpio_intr_enable(HEADPHONE_DETECT);
+
+    gpio_isr_handler_add(TRF7962A_IRQ_GPIO, trf7962a_isr, board_handle->trf7962a);
+    gpio_set_intr_type(TRF7962A_IRQ_GPIO, GPIO_INTR_POSEDGE);
+    gpio_intr_enable(TRF7962A_IRQ_GPIO);
 
     /* not used yet */
     esp_sleep_enable_gpio_wakeup();
@@ -239,6 +236,11 @@ audio_board_handle_t audio_board_get_handle(void)
 audio_hal_handle_t audio_board_get_hal(void)
 {
     return board_handle->audio_hal;
+}
+
+trf7962a_t audio_board_get_trf(void)
+{
+    return board_handle->trf7962a;
 }
 
 esp_err_t audio_board_deinit(audio_board_handle_t audio_board)
