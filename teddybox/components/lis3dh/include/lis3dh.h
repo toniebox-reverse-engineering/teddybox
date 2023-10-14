@@ -15,6 +15,7 @@ struct lis3dh_s
 {
     i2c_bus_handle_t i2c_handle;
     uint16_t range;
+    bool valid;
     esp_err_t (*set_data_rate)(lis3dh_t ctx, int rate);
     esp_err_t (*fetch)(lis3dh_t ctx, float *measurements);
 };

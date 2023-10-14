@@ -183,7 +183,11 @@ void accel_mainthread(void *arg)
         /* polling is not the best way. better study datasheet and use the sensor's internal features */
         vTaskDelay(ACCEL_LOOP_MS / portTICK_RATE_MS);
 
-        board->lis3dh->fetch(board->lis3dh, accel);
+        esp_err_t err = board->lis3dh->fetch(board->lis3dh, accel);
+        if(err != ESP_OK)
+        {
+            continue;
+        }
         float x = accel[2];
         float y = accel[1];
         float z = -accel[0];

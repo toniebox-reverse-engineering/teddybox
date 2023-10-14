@@ -148,7 +148,7 @@ static void got_ip_event_handler(void *arg, esp_event_base_t event_base,
                                  int32_t event_id, void *event_data)
 {
     ip_event_got_ip_t *event = (ip_event_got_ip_t *)event_data;
-    ESP_LOGI(TAG, "got ip: " IPSTR, IP2STR(&event->ip_info.ip));
+    ESP_LOGI(TAG, "IP Address: " IPSTR, IP2STR(&event->ip_info.ip));
 }
 
 void wifi_load_nvs(void)
@@ -247,7 +247,7 @@ void wifi_save_nvs(void)
 
 void wifi_init(void)
 {
-    esp_log_level_set(TAG, ESP_LOG_WARN);
+    esp_log_level_set(TAG, ESP_LOG_INFO);
 
     wifi_load_nvs();
 

@@ -54,6 +54,7 @@ static esp_err_t i2c_init(audio_board_handle_t board)
     if (!board->i2c_handle)
     {
         ESP_LOGE(TAG, "I2C init failed");
+        return ESP_FAIL;
     }
 
     uint8_t reg_add = 0;
@@ -217,12 +218,13 @@ esp_err_t audio_board_sdcard_init(esp_periph_set_handle_t set, periph_sdcard_mod
         }
         else
         {
-            vTaskDelay(500 / portTICK_PERIOD_MS);
+            vTaskDelay(100 / portTICK_PERIOD_MS);
         }
     }
     if (mount_flag == false)
     {
-        ESP_LOGE(TAG, "Sdcard mount failed");
+        ESP_LOGE(TAG, "SD card mount failed");
+        esp_periph_stop(sdcard_handle);
         return ESP_FAIL;
     }
     return ret;

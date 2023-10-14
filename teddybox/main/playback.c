@@ -27,6 +27,7 @@ audio_element_handle_t i2s_stream_writer, music_decoder;
 audio_event_iface_handle_t evt;
 
 static QueueHandle_t playback_queue;
+static bool pb_default_content = false;
 
 static const char *TAG = "[PB]";
 
@@ -361,12 +362,14 @@ esp_err_t pb_play_default_lang(uint32_t lang, uint32_t id)
     struct stat st;
     if (stat(filename, &st) == 0)
     {
+        pb_default_content = true;
         return pb_play(filename);
     }
     lang = 0;
     sprintf(filename, "/sdcard/CONTENT/%08X/%08X", lang, id);
     if (stat(filename, &st) == 0)
     {
+        pb_default_content = true;
         return pb_play(filename);
     }
     ESP_LOGE(TAG, "requested ID does not exist: '%08X', neither in lang %d nor in default", id, lang);
@@ -391,6 +394,7 @@ esp_err_t pb_play_content(uint32_t id)
         led_set_rgb(100, 0, 0);
         return ESP_ERR_NOT_FOUND;
     }
+    pb_default_content = false;
     return pb_play(filename);
 }
 
@@ -450,6 +454,31 @@ void pb_mainthread(void *arg)
             default:
                 ESP_LOGI(TAG, "[ * ] Receive info from %d", msg.source_type);
                 break;
+            case PERIPH_ID_SDCARD:
+            {
+                switch (msg.cmd)
+                {
+                case SDCARD_STATUS_UNKNOWN:
+                    ESP_LOGI(TAG, "SDCARD_STATUS_UNKNOWN");
+                    break;
+                case SDCARD_STATUS_CARD_DETECT_CHANGE:
+                    ESP_LOGI(TAG, "SDCARD_STATUS_CARD_DETECT_CHANGE");
+                    break;
+                case SDCARD_STATUS_MOUNTED:
+                    ESP_LOGI(TAG, "SDCARD_STATUS_MOUNTED");
+                    break;
+                case SDCARD_STATUS_UNMOUNTED:
+                    ESP_LOGI(TAG, "SDCARD_STATUS_UNMOUNTED");
+                    break;
+                case SDCARD_STATUS_MOUNT_ERROR:
+                    ESP_LOGI(TAG, "SDCARD_STATUS_MOUNT_ERROR");
+                    break;
+                case SDCARD_STATUS_UNMOUNT_ERROR:
+                    ESP_LOGI(TAG, "SDCARD_STATUS_UNMOUNT_ERROR");
+                    break;
+                }
+                break;
+            }
             case AUDIO_ELEMENT_TYPE_ELEMENT:
             {
                 if (msg.cmd == AEL_MSG_CMD_REPORT_MUSIC_INFO)
@@ -485,19 +514,28 @@ void pb_mainthread(void *arg)
                     case AEL_STATUS_STATE_PAUSED:
                         ESP_LOGW(TAG, "[Event] [%s] Pause", source);
                         playing = true;
-                        led_set_rgb(0, 50, 50);
+                        if (!pb_default_content)
+                        {
+                            led_set_rgb(0, 50, 50);
+                        }
                         break;
                     case AEL_STATUS_STATE_RUNNING:
                         ESP_LOGW(TAG, "[Event] [%s] Run", source);
                         playing = true;
-                        led_set_rgb(0, 50, 100);
+                        if (!pb_default_content)
+                        {
+                            led_set_rgb(0, 50, 100);
+                        }
                         break;
                     case AEL_STATUS_STATE_STOPPED:
                     case AEL_STATUS_STATE_FINISHED:
                         ESP_LOGW(TAG, "[Event] [%s] Stop", source);
                         if (msg.source == (void *)i2s_stream_writer)
                         {
-                            led_set_rgb(0, 100, 0);
+                            if (!pb_default_content)
+                            {
+                                led_set_rgb(0, 100, 0);
+                            }
                             playing = false;
                             audio_pipeline_reset_ringbuffer(pipeline);
                             audio_pipeline_reset_elements(pipeline);

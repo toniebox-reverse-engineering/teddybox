@@ -320,7 +320,7 @@ esp_err_t trf7962a_read_packet(trf7962a_t ctx, uint8_t *data, uint8_t *length)
                 trf7962a_read_fifo(ctx, &data[*length], avail);
                 (*length) += avail;
             }
-            //ESP_LOGI(TAG, "Rx timed out, %d bytes read", *length);
+            // ESP_LOGI(TAG, "Rx timed out, %d bytes read", *length);
             break;
         }
 
@@ -360,7 +360,7 @@ esp_err_t trf7962a_read_packet(trf7962a_t ctx, uint8_t *data, uint8_t *length)
                     ret = ESP_OK;
                     t_before_us = esp_timer_get_time();
                     timeout = 5000;
-                    //ESP_LOGI(TAG, "trf7962a_read_packet avail: %d IRQ: %02X, FIFO: %02X", avail, ctx->irq_status, fifo_status);
+                    // ESP_LOGI(TAG, "trf7962a_read_packet avail: %d IRQ: %02X, FIFO: %02X", avail, ctx->irq_status, fifo_status);
                     trf7962a_read_fifo(ctx, &data[*length], avail);
                     trf7962a_irq_check(ctx);
                     // ESP_LOGI(TAG, "trf7962a_read_packet avail: %d IRQ: %02X, FIFO: %02X after", avail, ctx->irq_status, trf7962a_fifo_status(ctx));
@@ -375,6 +375,10 @@ esp_err_t trf7962a_read_packet(trf7962a_t ctx, uint8_t *data, uint8_t *length)
 
 esp_err_t trf7962a_xmit(trf7962a_t ctx, uint8_t *tx_data, uint8_t tx_length, uint8_t *rx_data, uint8_t *rx_length)
 {
+    if (!ctx->valid)
+    {
+        return ESP_FAIL;
+    }
     ESP_LOGD(TAG, "Tx %d bytes", tx_length);
     if (trf7962a_write_packet(ctx, tx_data, tx_length) != ESP_OK)
     {
@@ -414,6 +418,10 @@ void trf7962a_isr(void *ctx_in)
 
 void trf7962a_field(trf7962a_t ctx, bool enabled)
 {
+    if (!ctx->valid)
+    {
+        return ESP_FAIL;
+    }
     trf7962a_set_mask(ctx, REG_CHIP_STATUS_CONTROL, ~0x20, enabled ? 0x20 : 0);
 }
 
@@ -429,7 +437,7 @@ void trf7962a_init_regs(trf7962a_t ctx)
     }
 }
 
-void trf7962a_reset(trf7962a_t ctx)
+esp_err_t trf7962a_reset(trf7962a_t ctx)
 {
     /* reset chip */
     trf7962a_command(ctx, CMD_SOFT_INIT);
@@ -438,6 +446,16 @@ void trf7962a_reset(trf7962a_t ctx)
 
     trf7962a_init_regs(ctx);
     trf7962a_irq_reset(ctx);
+
+    uint8_t val;
+    trf7962a_get_reg(ctx, REG_CHIP_STATUS_CONTROL, &val, 1);
+    if (val != 0x21)
+    {
+        ESP_LOGE(TAG, "REG_CHIP_STATUS_CONTROL not set correctly. Chip not found.");
+        return ESP_FAIL;
+    }
+
+    return ESP_OK;
 }
 
 trf7962a_t trf7962a_init(spi_host_device_t host_id, int gpio)
@@ -447,6 +465,7 @@ trf7962a_t trf7962a_init(spi_host_device_t host_id, int gpio)
 
     trf7962a_t ctx = calloc(1, sizeof(struct trf7962a_s));
 
+    ctx->valid = false;
     ctx->ss_gpio = gpio;
     ctx->irq_received = xQueueCreate(10, sizeof(uint32_t));
 
@@ -470,16 +489,21 @@ trf7962a_t trf7962a_init(spi_host_device_t host_id, int gpio)
     if (ret != ESP_OK)
     {
         ESP_LOGE(TAG, "Failed: %d", ret);
+        return ctx;
     }
     ret = spi_bus_add_device(host_id, &devcfg_read, &ctx->spi_handle_read);
     if (ret != ESP_OK)
     {
         ESP_LOGE(TAG, "Failed: %d", ret);
+        return ctx;
     }
 
-    // trf7962a_dump_regs(ctx);
-
-    trf7962a_reset(ctx);
+    ret = trf7962a_reset(ctx);
+    if (ret != ESP_OK)
+    {
+        return ctx;
+    }
+    ctx->valid = true;
 
     return ctx;
 }

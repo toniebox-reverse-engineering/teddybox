@@ -26,6 +26,10 @@ esp_err_t lis3dh_set_reg(lis3dh_t ctx, uint8_t reg, uint8_t val)
 
 esp_err_t lis3dh_fetch(lis3dh_t ctx, float *measurements)
 {
+    if (!ctx->valid)
+    {
+        return ESP_FAIL;
+    }
     uint8_t reading[6];
     esp_err_t ret = 0;
 
@@ -76,6 +80,10 @@ esp_err_t lis3dh_get_range(lis3dh_t ctx)
 // Set Accelerometer Data Rate in Hz
 esp_err_t lis3dh_set_data_rate(lis3dh_t ctx, int rate)
 {
+    if (!ctx->valid)
+    {
+        return ESP_FAIL;
+    }
     uint8_t val = 0;
     lis3dh_get_reg(ctx, LIS3DH_CTRL_REG1, &val);
     val &= 0x0F;
@@ -148,24 +156,39 @@ lis3dh_t lis3dh_init(i2c_bus_handle_t i2c_handle)
     ctx->fetch = &lis3dh_fetch;
     ctx->set_data_rate = &lis3dh_set_data_rate;
 
-    lis3dh_set_reg(ctx, LIS3DH_CTRL_REG1, 0x07);
-    lis3dh_set_reg(ctx, LIS3DH_CTRL_REG2, 0x00);
-    lis3dh_set_reg(ctx, LIS3DH_CTRL_REG3, 0x00);
-    lis3dh_set_reg(ctx, LIS3DH_CTRL_REG4, 0x00);
-    lis3dh_set_reg(ctx, LIS3DH_CTRL_REG5, 0x00);
-    lis3dh_set_reg(ctx, LIS3DH_CTRL_REG6, 0x00);
-    lis3dh_set_reg(ctx, LIS3DH_INT1_CFG, 0x00);
-    lis3dh_set_reg(ctx, LIS3DH_INT1_THS, 0x00);
-    lis3dh_set_reg(ctx, LIS3DH_INT1_DURATION, 0x00);
-    lis3dh_set_reg(ctx, LIS3DH_CLICK_CFG, 0x00);
-    lis3dh_set_reg(ctx, LIS3DH_CLICK_THS, 0x00);
-    lis3dh_set_reg(ctx, LIS3DH_TIME_LIMIT, 0x00);
-    lis3dh_set_reg(ctx, LIS3DH_TIME_LATENCY, 0x00);
-    lis3dh_set_reg(ctx, LIS3DH_TIME_WINDOW, 0x00);
-    lis3dh_set_reg(ctx, LIS3DH_FIFO_CTRL_REG, 0x00);
-    lis3dh_set_reg(ctx, LIS3DH_TEMP_CFG_REG, 0x00);
+    esp_err_t err = ESP_OK;
 
-    lis3dh_get_range(ctx);
+    err |= lis3dh_set_reg(ctx, LIS3DH_CTRL_REG1, 0x07);
+
+    if (err != ESP_OK)
+    {
+        ctx->valid = false;
+        return ctx;
+    }
+    err |= lis3dh_set_reg(ctx, LIS3DH_CTRL_REG2, 0x00);
+    err |= lis3dh_set_reg(ctx, LIS3DH_CTRL_REG3, 0x00);
+    err |= lis3dh_set_reg(ctx, LIS3DH_CTRL_REG4, 0x00);
+    err |= lis3dh_set_reg(ctx, LIS3DH_CTRL_REG5, 0x00);
+    err |= lis3dh_set_reg(ctx, LIS3DH_CTRL_REG6, 0x00);
+    err |= lis3dh_set_reg(ctx, LIS3DH_INT1_CFG, 0x00);
+    err |= lis3dh_set_reg(ctx, LIS3DH_INT1_THS, 0x00);
+    err |= lis3dh_set_reg(ctx, LIS3DH_INT1_DURATION, 0x00);
+    err |= lis3dh_set_reg(ctx, LIS3DH_CLICK_CFG, 0x00);
+    err |= lis3dh_set_reg(ctx, LIS3DH_CLICK_THS, 0x00);
+    err |= lis3dh_set_reg(ctx, LIS3DH_TIME_LIMIT, 0x00);
+    err |= lis3dh_set_reg(ctx, LIS3DH_TIME_LATENCY, 0x00);
+    err |= lis3dh_set_reg(ctx, LIS3DH_TIME_WINDOW, 0x00);
+    err |= lis3dh_set_reg(ctx, LIS3DH_FIFO_CTRL_REG, 0x00);
+    err |= lis3dh_set_reg(ctx, LIS3DH_TEMP_CFG_REG, 0x00);
+
+    err |= lis3dh_get_range(ctx);
+
+    if (err != ESP_OK)
+    {
+        ctx->valid = false;
+        return ctx;
+    }
+    ctx->valid = true;
 
     return ctx;
 }

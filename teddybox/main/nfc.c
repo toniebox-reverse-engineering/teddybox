@@ -72,14 +72,18 @@ esp_err_t nfc_get_rand(trf7962a_t trf, uint8_t *rand)
     return ESP_OK;
 }
 
-void nfc_reset(trf7962a_t trf)
+esp_err_t nfc_reset(trf7962a_t trf)
 {
     ESP_LOGD(TAG, "NFC Reset");
+    if (trf7962a_reset(trf) != ESP_OK)
+    {
+        return ESP_FAIL;
+    }
     trf7962a_field(trf, false);
     vTaskDelay(10 / portTICK_PERIOD_MS);
-    trf7962a_reset(trf);
     trf7962a_field(trf, true);
     vTaskDelay(10 / portTICK_PERIOD_MS);
+    return ESP_OK;
 }
 
 static void nfc_play()
@@ -96,7 +100,7 @@ static void nfc_stop()
 void nfc_mainthread(void *arg)
 {
     nfc_state_t state = STATE_SEARCHING;
-    trf7962a_t trf = audio_board_get_trf();
+    trf7962a_t trf = (trf7962a_t)arg;
 
     while (true)
     {
@@ -240,6 +244,13 @@ void nfc_mainthread(void *arg)
 void nfc_init()
 {
     esp_log_level_set(TAG, ESP_LOG_INFO);
+    trf7962a_t trf = audio_board_get_trf();
 
-    xTaskCreatePinnedToCore(nfc_mainthread, "nfc_main", 8192, NULL, NFC_TASK_PRIO, NULL, tskNO_AFFINITY);
+    if (nfc_reset(trf) != ESP_OK)
+    {
+        ESP_LOGE(TAG, "NFC chip not detected. Exiting.");
+        return;
+    }
+
+    xTaskCreatePinnedToCore(nfc_mainthread, "nfc_main", 8192, trf, NFC_TASK_PRIO, NULL, tskNO_AFFINITY);
 }
