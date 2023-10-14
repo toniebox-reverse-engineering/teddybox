@@ -139,6 +139,7 @@ esp_err_t trf7962a_command(trf7962a_t ctx, uint8_t cmd);
 esp_err_t trf7962a_write_packet(trf7962a_t ctx, uint8_t *data, uint8_t length);
 esp_err_t trf7962a_read_packet(trf7962a_t ctx, uint8_t *data, uint8_t *length);
 void trf7962a_reset(trf7962a_t ctx);
+void trf7962a_init_regs(trf7962a_t ctx);
 void trf7962a_isr(void *ctx_in);
 esp_err_t trf7962a_xmit(trf7962a_t ctx, uint8_t *tx_data, uint8_t tx_length, uint8_t *data_data, uint8_t *rx_length);
 void trf7962a_field(trf7962a_t ctx, bool enabled);

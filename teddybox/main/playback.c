@@ -19,6 +19,7 @@
 #include "playback.h"
 #include "board.h"
 #include "math.h"
+#include "led.h"
 #include "toniebox.pb.taf-header.pb-c.h"
 
 audio_pipeline_handle_t pipeline;
@@ -387,9 +388,18 @@ esp_err_t pb_play_content(uint32_t id)
     if (stat(filename, &st) != 0)
     {
         ESP_LOGE(TAG, "requested file does not exist: '%s'", filename);
+        led_set_rgb(100, 0, 0);
         return ESP_ERR_NOT_FOUND;
     }
     return pb_play(filename);
+}
+
+esp_err_t pb_stop()
+{
+    char *msg = NULL;
+    xQueueSend(playback_queue, &msg, portMAX_DELAY);
+
+    return ESP_OK;
 }
 
 void pb_mainthread(void *arg)
@@ -405,7 +415,7 @@ void pb_mainthread(void *arg)
 
         if (xQueueReceive(playback_queue, &item, 0) == pdTRUE)
         {
-            ESP_LOGI(TAG, "[ * ] Set up uri: '%s'", item);
+            ESP_LOGI(TAG, "STOP");
             if (playing)
             {
                 audio_pipeline_pause(pipeline);
@@ -417,16 +427,20 @@ void pb_mainthread(void *arg)
                 playing = false;
             }
 
-            if (pb_toniefile_open(&pb_toniefile_info, item) != ESP_OK)
+            if (item)
             {
-                ESP_LOGE(TAG, "[ * ] Failed to read file: '%s'", item);
+                ESP_LOGI(TAG, "Play: '%s'", item);
+                if (pb_toniefile_open(&pb_toniefile_info, item) != ESP_OK)
+                {
+                    ESP_LOGE(TAG, "Failed to read file: '%s'", item);
+                }
+                else
+                {
+                    audio_pipeline_run(pipeline);
+                    audio_pipeline_resume(pipeline);
+                }
+                free(item);
             }
-            else
-            {
-                audio_pipeline_run(pipeline);
-                audio_pipeline_resume(pipeline);
-            }
-            free(item);
         }
 
         if (audio_event_iface_listen(evt, &msg, 50 / portTICK_PERIOD_MS) == ESP_OK)

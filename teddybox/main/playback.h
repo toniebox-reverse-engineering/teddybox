@@ -51,3 +51,4 @@ esp_err_t pb_play(const char *uri);
 esp_err_t pb_play_default_lang(uint32_t lang, uint32_t id);
 esp_err_t pb_play_default(uint32_t id);
 esp_err_t pb_play_content(uint32_t id);
+esp_err_t pb_stop();
