@@ -112,7 +112,7 @@ void nfc_mainthread(void *arg)
             ESP_LOGI(TAG, "Tag detected");
 
             bool unlocked = false;
-            uint32_t passes[] = {0x7FFD6E5B, 0x0F0F0F0F, 0x00000000};
+            uint32_t passes[] = {0x0F0F0F0F /*, 0x7FFD6E5B, 0x00000000*/};
 
             for (int pass = 0; pass < COUNT(passes); pass++)
             {
@@ -131,6 +131,7 @@ void nfc_mainthread(void *arg)
                 slix_set_pass[6] = (passes[pass] >> 16) ^ rand[0];
                 slix_set_pass[7] = (passes[pass] >> 24) ^ rand[1];
 
+                nfc_log_dump("SET PASS", slix_set_pass, sizeof(slix_set_pass));
                 if (trf7962a_xmit(trf, slix_set_pass, sizeof(slix_set_pass), received_data, &received_length) != ESP_OK)
                 {
                     ESP_LOGE(TAG, "  Password incorrect");

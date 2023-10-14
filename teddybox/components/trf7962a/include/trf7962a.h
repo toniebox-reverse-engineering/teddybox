@@ -125,15 +125,12 @@ extern "C"
     {REG_IRQ_MASK, 0x00, 0x3E},                     \
     {REG_MODULATOR_CONTROL, 0x00, 0x21},            \
     {REG_TX_PULSE_LENGTH_CONTROL, 0x00, 0x80},      \
-    {0xFF, 0xFF}
-
-    /*
-    
     {REG_RX_NO_RESPONSE_WAIT_TIME, 0x00, 0x14},     \
     {REG_RX_WAIT_TIME, 0x00, 0x1F},                 \
     {REG_RX_SPECIAL_SETTINGS, 0x0F, 0x40},          \
     {REG_SPECIAL_FUNCTION_1, 0xFF, 0x10},           \
-    */
+    {0xFF, 0xFF}
+
 
 trf7962a_t trf7962a_init(spi_host_device_t host_id, int gpio);
 esp_err_t trf7962a_get_reg(trf7962a_t ctx, uint8_t reg, uint8_t *val, int count);

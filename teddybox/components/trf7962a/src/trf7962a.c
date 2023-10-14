@@ -50,18 +50,14 @@ esp_err_t trf7962a_get_reg(trf7962a_t ctx, uint8_t reg, uint8_t *data, int count
 
     gpio_set_level(ctx->ss_gpio, 1);
 
-    if (reg == REG_FIFO)
-    { /*
-         for (int pos = 0; pos < t.length / 8; pos++)
-         {
-             ESP_LOGE(TAG, "    %02X", rx_buffer[pos]);
-         }*/
-        memmove(&data[0], &rx_buffer[0], count);
-    }
-    else
+    if (0)
     {
-        memmove(&data[0], &rx_buffer[0], count);
+        for (int pos = 0; pos < t.length / 8; pos++)
+        {
+            ESP_LOGE(TAG, "    %02X", rx_buffer[pos]);
+        }
     }
+    memmove(&data[0], &rx_buffer[0], count);
     return ret;
 }
 
@@ -167,7 +163,7 @@ esp_err_t trf7962a_read_fifo(trf7962a_t ctx, uint8_t *data, uint8_t length)
     return ESP_OK;
 }
 
-int32_t trf7962a_write_fifo(trf7962a_t ctx, bool initiate, uint8_t *data, uint8_t length)
+int32_t trf7962a_write_fifo(trf7962a_t ctx, bool initiate, uint8_t *data, uint16_t length)
 {
     uint8_t tx_buf[8 + TRF7962A_FIFO_SIZE];
     uint8_t rx_buf[8 + TRF7962A_FIFO_SIZE];
@@ -257,6 +253,7 @@ esp_err_t trf7962a_write_packet(trf7962a_t ctx, uint8_t *data, uint8_t length)
         /* wait till reception starts */
         if (ctx->irq_status & 0x40)
         {
+            ESP_LOGE(TAG, "Response, IRQ 0x%02X, FIFO %02X", ctx->irq_status, trf7962a_fifo_status(ctx));
             ret = ESP_OK;
             break;
         }
@@ -264,7 +261,7 @@ esp_err_t trf7962a_write_packet(trf7962a_t ctx, uint8_t *data, uint8_t length)
         int64_t t_loop_us = esp_timer_get_time();
         if (t_loop_us - t_before_us > 100000)
         {
-            ESP_LOGE(TAG, "Response timeout");
+            ESP_LOGE(TAG, "Response timeout, IRQ 0x%02X, FIFO %02X", ctx->irq_status, trf7962a_fifo_status(ctx));
             ret = ESP_FAIL;
             break;
         }
@@ -284,6 +281,14 @@ esp_err_t trf7962a_read_packet(trf7962a_t ctx, uint8_t *data, uint8_t *length)
         int64_t t_loop_us = esp_timer_get_time();
         if (t_loop_us - t_before_us > timeout)
         {
+            /* hack. we are always reading one less than in buffer because this chip sucks.
+               read that byte here */
+            if(*length)
+            {
+                int avail = 1;
+                trf7962a_read_fifo(ctx, &data[*length], avail);
+                (*length) += avail;
+            }
             ESP_LOGI(TAG, "Rx timed out, %d bytes read", *length);
             break;
         }
@@ -299,21 +304,23 @@ esp_err_t trf7962a_read_packet(trf7962a_t ctx, uint8_t *data, uint8_t *length)
         /* as long there is some data */
         if (ctx->irq_status & 0x40)
         {
-            uint8_t avail = ((trf7962a_fifo_status(ctx) + 1) & 0x0F);
+            uint8_t avail = ((trf7962a_fifo_status(ctx)) & 0x0F);
 
             if (avail >= TRF7962A_FIFO_SIZE)
             {
+                ESP_LOGE(TAG, "Rx FIFO fill state %d", avail);
                 break;
             }
 
             if (avail > 0)
             {
                 ret = ESP_OK;
-                ESP_LOGI(TAG, "trf7962a_read_packet avail: %d IRQ: %02X, FIFO: %02X", avail, ctx->irq_status, trf7962a_fifo_status(ctx));
+                // ESP_LOGI(TAG, "trf7962a_read_packet avail: %d IRQ: %02X, FIFO: %02X", avail, ctx->irq_status, trf7962a_fifo_status(ctx));
                 t_before_us = esp_timer_get_time();
                 timeout = 50000;
                 trf7962a_read_fifo(ctx, &data[*length], avail);
                 (*length) += avail;
+                trf7962a_fifo_status(ctx);
             }
         }
     }
