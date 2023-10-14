@@ -30,6 +30,7 @@
 #include "webserver.h"
 #include "accel.h"
 #include "dac3100.h"
+#include "ota.h"
 #include "nfc.h"
 
 static const char *TAG = "[TB]";
@@ -72,8 +73,9 @@ void app_main(void)
 
     ESP_LOGI(TAG, "[ 1.1 ] Mount sdcard");
     audio_board_sdcard_init(set, SD_MODE_4_LINE);
+    
 
-    dir_list("/sdcard");
+    //dir_list("/sdcard");
 
     ESP_LOGI(TAG, "[ 1.2 ] Mount assets");
     esp_vfs_fat_sdmmc_mount_config_t mount_config = {
@@ -81,7 +83,7 @@ void app_main(void)
         .max_files = 5};
     esp_vfs_fat_spiflash_mount("/spiflash", NULL, &mount_config, &s_test_wl_handle);
 
-    dir_list("/spiflash");
+    //dir_list("/spiflash");
 
     ESP_LOGI(TAG, "[ 2 ] Start codec chip");
     audio_hal_ctrl_codec(audio_board_get_hal(), AUDIO_HAL_CODEC_MODE_DECODE, AUDIO_HAL_CTRL_START);
@@ -93,6 +95,7 @@ void app_main(void)
     wifi_init();
     www_init();
     nfc_init();
+    ota_init();
 
     int volume = 30;
     audio_hal_set_volume(audio_board_get_hal(), volume);
@@ -105,7 +108,6 @@ void app_main(void)
 
     bool ear_big_prev = false;
     bool ear_small_prev = false;
-    bool autostart = true;
 
     while (1)
     {
@@ -117,16 +119,6 @@ void app_main(void)
             ESP_LOGI(TAG, "Headset detected: %s", type ? "YES" : "NO");
             dac3100_set_mute(type);
         }
-/*
-        if (esp_timer_get_time() > 6000000 && autostart)
-        {
-            autostart = false;
-            ESP_LOGI(TAG, "[ 6 ] play audio");
-            if (pb_play_content(0x07BAC90F) != ESP_OK)
-            {
-                pb_play_default(CONTENT_DEFAULT_CODE_KOALA);
-            }
-        }*/
 
         bool ear_big = audio_board_ear_big();
         bool ear_small = audio_board_ear_small();
