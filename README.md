@@ -2,7 +2,7 @@
 
 ## Setup
 Tried on linux (WSL, Ubuntu-22.04) only yet.
-Execute ./setup_libs.sh which will download edp-adf and esp-idf.
+Execute ./setup_libs.sh which will download esp-adf and esp-idf.
 
 ## Environment
 Before you can compile, you have to source the "env_vars.sh" in your shell environment.
