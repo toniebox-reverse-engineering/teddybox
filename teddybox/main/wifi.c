@@ -1,5 +1,7 @@
 
 
+#include <string.h>
+
 #include "freertos/FreeRTOS.h"
 #include "freertos/event_groups.h"
 #include "esp_wifi.h"
@@ -7,8 +9,9 @@
 #include "esp_wps.h"
 #include "esp_event.h"
 #include "nvs_flash.h"
-#include <string.h>
+
 #include "wifi.h"
+#include "cloud.h"
 
 #define MAX_RETRY_ATTEMPTS 2
 
@@ -25,14 +28,14 @@ static int s_ap_creds_idx = 0;
 static int s_retry_num = 0;
 static bool nvs_updated = false;
 
-static int r_ap_idx(int ap_idx) 
+static int r_ap_idx(int ap_idx)
 {
-    return s_ap_creds_num-ap_idx-1;
+    return s_ap_creds_num - ap_idx - 1;
 }
+
 static void wifi_event_handler(void *arg, esp_event_base_t event_base,
                                int32_t event_id, void *event_data)
 {
-    
     switch (event_id)
     {
     case WIFI_EVENT_STA_START:
@@ -155,7 +158,7 @@ void wifi_load_nvs(void)
 {
     s_ap_creds_num = 0;
     s_ap_creds_idx = 0;
-    
+
     do
     {
         nvs_handle_t nvs_handle;
@@ -174,11 +177,12 @@ void wifi_load_nvs(void)
             break;
         }
 
-        if (index > MAX_WPS_AP_CRED) {
+        if (index > MAX_WPS_AP_CRED)
+        {
             ESP_LOGE(TAG, "WiFi INDEX too high %i (%s)", index, esp_err_to_name(err));
             index = MAX_WPS_AP_CRED;
         }
-        for (size_t i=0; i<index; i++)
+        for (size_t i = 0; i < index; i++)
         {
             char *ssid = "SSID+";
             char *pw = "PW+";
@@ -200,7 +204,7 @@ void wifi_load_nvs(void)
                 break;
             }
             ESP_LOGI(TAG, "SSID: '%s' PW:'%s'", wps_ap_creds[i].sta.ssid, wps_ap_creds[i].sta.password);
-            
+
             s_ap_creds_num++;
         }
         nvs_updated = false;
@@ -225,14 +229,14 @@ void wifi_save_nvs(void)
             break;
         }
 
-        err = nvs_set_blob(nvs_handle, "SSID0", wps_ap_creds[0].sta.ssid, strlen((char*)wps_ap_creds[0].sta.ssid));
+        err = nvs_set_blob(nvs_handle, "SSID0", wps_ap_creds[0].sta.ssid, strlen((char *)wps_ap_creds[0].sta.ssid));
         if (err != ESP_OK)
         {
             ESP_LOGE(TAG, "Failed to write SSID (%s)", esp_err_to_name(err));
             nvs_close(nvs_handle);
             break;
         }
-        err = nvs_set_blob(nvs_handle, "PW0", wps_ap_creds[0].sta.password, strlen((char*)wps_ap_creds[0].sta.password));
+        err = nvs_set_blob(nvs_handle, "PW0", wps_ap_creds[0].sta.password, strlen((char *)wps_ap_creds[0].sta.password));
         if (err != ESP_OK)
         {
             ESP_LOGE(TAG, "Failed to write PW (%s)", esp_err_to_name(err));
