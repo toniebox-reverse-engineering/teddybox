@@ -22,6 +22,8 @@ static uint8_t slix_set_pass[] = {0x02, 0xB3, 0x04, 0x04, 0x00, 0x00, 0x00, 0x00
 static uint8_t received_data[256];
 static uint8_t received_length;
 
+static char dump_buf[129];
+
 bool nfc_valid = false;
 uint8_t nfc_current_uid[8];
 
@@ -48,7 +50,6 @@ void nfc_dump(char *buffer, uint8_t *data, uint8_t length)
 
 void nfc_log_dump(const char *title, uint8_t *data, uint8_t length)
 {
-    char dump_buf[129];
     nfc_dump(dump_buf, data, length);
     ESP_LOGD(TAG, "%s: %s", title, dump_buf);
 }
@@ -88,7 +89,15 @@ esp_err_t nfc_reset(trf7962a_t trf)
 
 static void nfc_play()
 {
-    uint32_t uid = (nfc_current_uid[0] << 24) | (nfc_current_uid[1] << 16) | (nfc_current_uid[2] << 8) | nfc_current_uid[3];
+    uint64_t uid = ((uint64_t)nfc_current_uid[7] << 56) |
+                   ((uint64_t)nfc_current_uid[6] << 48) |
+                   ((uint64_t)nfc_current_uid[5] << 40) |
+                   ((uint64_t)nfc_current_uid[4] << 32) |
+                   ((uint64_t)nfc_current_uid[3] << 24) |
+                   ((uint64_t)nfc_current_uid[2] << 16) |
+                   ((uint64_t)nfc_current_uid[1] <<  8) |
+                   ((uint64_t)nfc_current_uid[0]);
+
     pb_play_content(uid);
 }
 
@@ -139,7 +148,6 @@ void nfc_mainthread(void *arg)
                 break;
             }
 
-            char dump_buf[129];
             nfc_dump(dump_buf, &received_data[2], 8);
 
             if (!nfc_valid)
@@ -170,7 +178,6 @@ void nfc_mainthread(void *arg)
             if (nfc_valid)
             {
                 nfc_valid = false;
-                char dump_buf[129];
                 nfc_dump(dump_buf, nfc_current_uid, 8);
                 ESP_LOGI(TAG, "Tag disappeared: %s", dump_buf);
                 nfc_stop();
@@ -252,5 +259,5 @@ void nfc_init()
         return;
     }
 
-    xTaskCreatePinnedToCore(nfc_mainthread, "nfc_main", 8192, trf, NFC_TASK_PRIO, NULL, tskNO_AFFINITY);
+    xTaskCreatePinnedToCore(nfc_mainthread, "nfc_main", 6000, trf, NFC_TASK_PRIO, NULL, tskNO_AFFINITY);
 }

@@ -18,12 +18,12 @@
 #include "trf7962a_regs.h"
 
 static const char *TAG = "TRF7962A";
+static uint8_t tx_buffer[32];
+static uint8_t rx_buffer[32];
 
 esp_err_t trf7962a_get_reg(trf7962a_t ctx, uint8_t reg, uint8_t *data, int count)
 {
     esp_err_t ret;
-    uint8_t tx_buffer[32] = {0};
-    uint8_t rx_buffer[32] = {0};
 
     uint8_t cmd = (reg & 0b00011111) | REGISTER_B7 | READ_B6 | ((count > 1) ? CONTINUOUS_MODE_REG_B5 : 0);
 
@@ -420,7 +420,7 @@ void trf7962a_field(trf7962a_t ctx, bool enabled)
 {
     if (!ctx->valid)
     {
-        return ESP_FAIL;
+        return;
     }
     trf7962a_set_mask(ctx, REG_CHIP_STATUS_CONTROL, ~0x20, enabled ? 0x20 : 0);
 }

@@ -206,5 +206,5 @@ void accel_init(audio_board_handle_t board)
 {
     esp_log_level_set(TAG, ESP_LOG_INFO);
 
-    xTaskCreatePinnedToCore(accel_mainthread, "accel_main", 4096, (void *)board, ACCEL_TASK_PRIO, NULL, tskNO_AFFINITY);
+    xTaskCreatePinnedToCore(accel_mainthread, "accel_main", 2048, (void *)board, ACCEL_TASK_PRIO, NULL, tskNO_AFFINITY);
 }

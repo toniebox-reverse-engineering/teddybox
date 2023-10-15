@@ -311,7 +311,7 @@ void pb_init(esp_periph_set_handle_t set)
     i2s_stream_cfg_t i2s_cfg = I2S_STREAM_CFG_DEFAULT();
     i2s_cfg.type = AUDIO_STREAM_WRITER;
     i2s_cfg.i2s_config.use_apll = false;
-    i2s_cfg.i2s_config.dma_buf_count = 8;
+    i2s_cfg.i2s_config.dma_buf_count = 4;
     i2s_cfg.i2s_config.dma_buf_len = 512;
 
     i2s_stream_writer = i2s_stream_init(&i2s_cfg);
@@ -341,8 +341,7 @@ void pb_init(esp_periph_set_handle_t set)
     ESP_LOGI(TAG, "Listening event from peripherals");
     audio_event_iface_set_listener(esp_periph_set_get_event_iface(set), evt);
 
-    xTaskCreatePinnedToCore(pb_mainthread, "pb_main", 8192, NULL,
-                            PB_TASK_PRIO, NULL, tskNO_AFFINITY);
+    xTaskCreatePinnedToCore(pb_mainthread, "pb_main", 6000, NULL, PB_TASK_PRIO, NULL, tskNO_AFFINITY);
 }
 
 esp_err_t pb_play(const char *uri)
@@ -382,11 +381,27 @@ esp_err_t pb_play_default(uint32_t id)
     return pb_play_default_lang(0, id);
 }
 
-esp_err_t pb_play_content(uint32_t id)
+/* 0x500304E0 */
+
+esp_err_t pb_play_content(uint64_t id)
 {
     char filename[64];
+    char *filename_ptr = filename;
 
-    sprintf(filename, "/sdcard/CONTENT/%08X/%08X", id, 0x500304E0);
+    filename_ptr += sprintf(filename_ptr, "/sdcard/CONTENT/");
+
+    for (int i = 0; i < 4; ++i)
+    {
+        uint8_t byte = (id >> (i * 8)) & 0xFF;
+        filename_ptr += sprintf(filename_ptr, "%02X", byte);
+    }
+    filename_ptr += sprintf(filename_ptr, "/");
+    for (int i = 4; i < 8; ++i)
+    {
+        uint8_t byte = (id >> (i * 8)) & 0xFF;
+        filename_ptr += sprintf(filename_ptr, "%02X", byte);
+    }
+
     struct stat st;
     if (stat(filename, &st) != 0)
     {

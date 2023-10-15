@@ -34,6 +34,8 @@
 #include "nfc.h"
 #include "cloud.h"
 
+#include "esp_heap_trace.h"
+
 static const char *TAG = "[TB]";
 static wl_handle_t s_test_wl_handle;
 
@@ -52,6 +54,42 @@ void dir_list(const char *path)
     closedir(dir);
 }
 
+void print_all_tasks(void *params)
+{
+    TaskStatus_t *taskStatusArray;
+    UBaseType_t taskCount;
+    UBaseType_t i;
+    size_t free_heap_size;
+
+    while (1)
+    {
+        taskCount = uxTaskGetNumberOfTasks();
+        taskStatusArray = pvPortMalloc(taskCount * sizeof(TaskStatus_t));
+
+        if (taskStatusArray != NULL)
+        {
+            taskCount = uxTaskGetSystemState(taskStatusArray, taskCount, NULL);
+            
+            free_heap_size = esp_get_free_heap_size();
+            ESP_LOGI(TAG, "Task Count:     %d", taskCount);
+            ESP_LOGI(TAG, "Free Heap Size: %d", free_heap_size);
+            ESP_LOGI(TAG, "");
+            ESP_LOGI(TAG, "StackMark Name");
+
+            for (i = 0; i < taskCount; i++)
+            {
+                ESP_LOGI(TAG, "%6d %s",
+                         uxTaskGetStackHighWaterMark(taskStatusArray[i].xHandle),
+                         taskStatusArray[i].pcTaskName);
+            }
+
+            vPortFree(taskStatusArray);
+        }
+
+        vTaskDelay(pdMS_TO_TICKS(5000)); // Wait for 5 seconds
+    }
+}
+
 void app_main(void)
 {
     /* Initialize NVS — it is used to store PHY calibration data */
@@ -66,6 +104,7 @@ void app_main(void)
     esp_log_level_set("*", ESP_LOG_WARN);
     esp_log_level_set(TAG, ESP_LOG_INFO);
 
+
     esp_periph_config_t periph_cfg = DEFAULT_ESP_PERIPH_SET_CONFIG();
     esp_periph_set_handle_t set = esp_periph_set_init(&periph_cfg);
 
@@ -75,7 +114,6 @@ void app_main(void)
     ESP_LOGI(TAG, "[ 1.1 ] Mount sdcard");
     audio_board_sdcard_init(set, SD_MODE_4_LINE);
     
-
     //dir_list("/sdcard");
 
     ESP_LOGI(TAG, "[ 1.2 ] Mount assets");
@@ -91,13 +129,9 @@ void app_main(void)
 
     ESP_LOGI(TAG, "[ 3 ] Start handlers");
 
-    accel_init(board_handle);
     pb_init(set);
-    wifi_init();
-    www_init();
-    nfc_init();
-    ota_init();
-    cloud_init();
+    
+    xTaskCreate(print_all_tasks, "print_all_tasks", 4096, NULL, 5, NULL);
 
     int volume = 30;
     audio_hal_set_volume(audio_board_get_hal(), volume);
@@ -110,6 +144,14 @@ void app_main(void)
 
     bool ear_big_prev = false;
     bool ear_small_prev = false;
+
+    accel_init(board_handle);
+    wifi_init();
+    nfc_init();
+    cloud_init();
+    /* already too much memory consumption, do not enable by default */
+    //www_init();
+    //ota_init();
 
     while (1)
     {
