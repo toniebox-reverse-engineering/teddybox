@@ -32,6 +32,7 @@
 #include "dac3100.h"
 #include "ota.h"
 #include "nfc.h"
+#include "cloud.h"
 
 static const char *TAG = "[TB]";
 static wl_handle_t s_test_wl_handle;
@@ -96,6 +97,7 @@ void app_main(void)
     www_init();
     nfc_init();
     ota_init();
+    cloud_init();
 
     int volume = 30;
     audio_hal_set_volume(audio_board_get_hal(), volume);
