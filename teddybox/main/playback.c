@@ -46,6 +46,9 @@ typedef struct
     bool valid;
     char *filename;
     FILE *fd;
+    int32_t current_block;
+    uint8_t current_block_buffer[TONIEFILE_FRAME_SIZE];
+    int32_t current_block_avail;
     int32_t current_pos;
     int32_t target_pos;
     int32_t current_chapter;
@@ -130,8 +133,6 @@ esp_err_t pb_toniefile_open(pb_toniefile_t *info, const char *filepath)
         }
     }
 
-    info->current_pos = TONIEFILE_FRAME_SIZE;
-
     ESP_LOGI(TAG, "  Audio ID: %08X", info->taf->audio_id);
     ESP_LOGI(TAG, "  Size:     %08llX", info->taf->num_bytes);
     ESP_LOGI(TAG, "  Chapters: %d", info->taf->n_track_page_nums);
@@ -140,6 +141,8 @@ esp_err_t pb_toniefile_open(pb_toniefile_t *info, const char *filepath)
         ESP_LOGI(TAG, "    %d: offset %08X", chap, info->taf->track_page_nums[chap]);
     }
 
+    info->current_pos = TONIEFILE_FRAME_SIZE;
+    info->current_block = -1;
     info->current_chapter = -1;
     info->target_chapter = -1;
     info->target_pos = -1;
@@ -161,6 +164,35 @@ void pb_toniefile_close(pb_toniefile_t *info)
     }
     toniebox_audio_file_header__free_unpacked(info->taf, NULL);
     info->taf = NULL;
+}
+
+static size_t pb_ensure_block(pb_toniefile_t *info, FILE *fd)
+{
+    bool read = false;
+
+    if (info->current_pos >= (info->current_block + 1) * TONIEFILE_FRAME_SIZE)
+    {
+        read = true;
+    }
+    if (info->current_pos < info->current_block * TONIEFILE_FRAME_SIZE)
+    {
+        read = true;
+    }
+
+    if (read)
+    {
+        info->current_block = info->current_pos / TONIEFILE_FRAME_SIZE;
+        fseek(fd, info->current_block * TONIEFILE_FRAME_SIZE, SEEK_SET);
+        info->current_block_avail = fread(info->current_block_buffer, 1, TONIEFILE_FRAME_SIZE, fd);
+        if (info->current_block_avail < 0)
+        {
+            info->current_block_avail = 0;
+        }
+    }
+
+    size_t remain = info->current_block_avail - (info->current_pos % TONIEFILE_FRAME_SIZE);
+
+    return remain;
 }
 
 int pb_toniefile_cbr(audio_element_handle_t self, char *buffer, int len, TickType_t ticks_to_wait, void *context)
@@ -252,21 +284,28 @@ int pb_toniefile_cbr(audio_element_handle_t self, char *buffer, int len, TickTyp
     }
 
     int bytes_read = 0;
+    int avail = 0;
     if (current_dl_req)
     {
         while (!xSemaphoreTake(current_dl_req->file_sem, 1000 / portTICK_PERIOD_MS))
         {
             ESP_LOGE(TAG, "Playback: Timed out waiting for file lock...");
         }
-        fseek(current_dl_req->handle, info->current_pos, SEEK_SET);
-        bytes_read = fread(buffer, 1, len, current_dl_req->handle);
+        avail = pb_ensure_block(info, current_dl_req->handle);
         xSemaphoreGive(current_dl_req->file_sem);
     }
     else
     {
-        fseek(info->fd, info->current_pos, SEEK_SET);
-        bytes_read = fread(buffer, 1, len, info->fd);
+        avail = pb_ensure_block(info, info->fd);
     }
+
+    if (len > avail)
+    {
+        len = avail;
+    }
+    int offset = info->current_pos % TONIEFILE_FRAME_SIZE;
+    memcpy(buffer, &info->current_block_buffer[offset], len);
+    bytes_read = len;
 
     if (bytes_read > 0)
     {
@@ -699,7 +738,6 @@ void pb_init(esp_periph_set_handle_t set)
     opus_decoder_cfg_t opus_dec_cfg = DEFAULT_OPUS_DECODER_CONFIG();
     opus_dec_cfg.stack_in_ext = false;
     opus_dec_cfg.task_prio = 100;
-    opus_dec_cfg.out_rb_size = 2048;
     music_decoder = decoder_opus_init(&opus_dec_cfg);
 
     ESP_LOGI(TAG, "Register all elements to audio pipeline");
@@ -721,7 +759,7 @@ void pb_init(esp_periph_set_handle_t set)
     ESP_LOGI(TAG, "Listening event from peripherals");
     audio_event_iface_set_listener(esp_periph_set_get_event_iface(set), evt);
 
-    xTaskCreatePinnedToCore(pb_mainthread, "[TB] Playback", 4096, NULL, PB_TASK_PRIO, NULL, tskNO_AFFINITY);
+    xTaskCreatePinnedToCore(pb_mainthread, "[TB] Playback", 2500, NULL, PB_TASK_PRIO, NULL, tskNO_AFFINITY);
 }
 
 void pb_deinit()

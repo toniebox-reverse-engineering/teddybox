@@ -29,6 +29,7 @@ static char dump_buf[129];
 bool nfc_valid = false;
 uint8_t nfc_current_uid_rev[8];
 uint8_t nfc_current_token[32];
+static int nfc_retry = 0;
 
 static const char *TAG = "[NFC]";
 
@@ -141,7 +142,7 @@ void nfc_mainthread(void *arg)
 
     while (true)
     {
-        vTaskDelay(100 / portTICK_PERIOD_MS);
+        vTaskDelay(10 / portTICK_PERIOD_MS);
 
         switch (state)
         {
@@ -151,7 +152,10 @@ void nfc_mainthread(void *arg)
             {
                 nfc_reset(trf);
                 ESP_LOGE(TAG, "Failed to read SYSINFO");
-                state = STATE_SEARCHING;
+                if (nfc_retry++ > NFC_RETRIES)
+                {
+                    state = STATE_SEARCHING;
+                }
                 break;
             }
             nfc_log_dump("SYSINFO", received_data, received_length);
@@ -164,7 +168,10 @@ void nfc_mainthread(void *arg)
             {
                 nfc_reset(trf);
                 // ESP_LOGE(TAG, "Failed to read INVENTORY");
-                state = STATE_SEARCHING;
+                if (nfc_retry++ > NFC_RETRIES)
+                {
+                    state = STATE_SEARCHING;
+                }
                 break;
             }
             nfc_log_dump("INVENTORY", received_data, received_length);
@@ -172,9 +179,14 @@ void nfc_mainthread(void *arg)
             {
                 nfc_reset(trf);
                 // ESP_LOGE(TAG, "received INVENTORY with %d bytes, status %d", received_length, received_data[0]);
-                state = STATE_SEARCHING;
+                if (nfc_retry++ > NFC_RETRIES)
+                {
+                    state = STATE_SEARCHING;
+                }
                 break;
             }
+
+            nfc_retry = 0;
 
             nfc_dump(dump_buf, &received_data[2], 8);
 
@@ -268,6 +280,7 @@ void nfc_mainthread(void *arg)
             if (unlocked)
             {
                 ESP_LOGI(TAG, "Unlocked tag");
+                nfc_retry = 0;
                 state = STATE_TAG;
             }
 

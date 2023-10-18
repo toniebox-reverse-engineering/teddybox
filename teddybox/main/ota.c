@@ -20,22 +20,22 @@
 #include "lwip/sys.h"
 #include <lwip/netdb.h>
 
-#define BUFFSIZE 1024
-#define HASH_LEN 32 /* SHA-256 digest length */
+#define BUFFSIZE 512
+#define HASH_LEN 32
 static char rx_buffer[BUFFSIZE];
+static char addr_str[32];
 
 static const char *TAG = "OTA";
+static esp_app_desc_t new_app_info;
+static esp_app_desc_t running_app_info;
+static const esp_partition_t *configured = NULL;
+static const esp_partition_t *running = NULL;
+static const esp_partition_t *update_partition = NULL;
 
 void ota_mainthread(void *arg)
 {
     esp_err_t err;
     esp_ota_handle_t update_handle = 0;
-    const esp_partition_t *update_partition = NULL;
-    const esp_partition_t *configured = esp_ota_get_boot_partition();
-    const esp_partition_t *running = esp_ota_get_running_partition();
-
-    ESP_LOGW(TAG, "Configured 0x%08x '%s'", configured->address, configured->label);
-    ESP_LOGW(TAG, "Current    0x%08x '%s'", running->address, running->label);
 
     struct sockaddr_storage dest_addr;
 
@@ -74,8 +74,6 @@ void ota_mainthread(void *arg)
 
     while (1)
     {
-        char addr_str[128];
-
         ESP_LOGI(TAG, "Socket listening");
 
         struct sockaddr_storage source_addr;
@@ -92,10 +90,6 @@ void ota_mainthread(void *arg)
             inet_ntoa_r(((struct sockaddr_in *)&source_addr)->sin_addr, addr_str, sizeof(addr_str) - 1);
         }
         ESP_LOGI(TAG, "Socket accepted ip address: %s", addr_str);
-
-        update_partition = esp_ota_get_next_update_partition(NULL);
-        assert(update_partition != NULL);
-        ESP_LOGI(TAG, "Writing to partition subtype %d at offset 0x%x", update_partition->subtype, update_partition->address);
 
         err = esp_ota_begin(update_partition, OTA_WITH_SEQUENTIAL_WRITES, &update_handle);
         if (err != ESP_OK)
@@ -133,32 +127,9 @@ void ota_mainthread(void *arg)
                 // check current version with downloading
                 if (image_header_was_checked == false)
                 {
-                    esp_app_desc_t new_app_info;
                     memcpy(&new_app_info, &rx_buffer[sizeof(esp_image_header_t) + sizeof(esp_image_segment_header_t)], sizeof(esp_app_desc_t));
                     ESP_LOGI(TAG, "New firmware version: %s", new_app_info.version);
 
-                    esp_app_desc_t running_app_info;
-                    if (esp_ota_get_partition_description(running, &running_app_info) == ESP_OK)
-                    {
-                        ESP_LOGI(TAG, "Running firmware version: %s", running_app_info.version);
-                    }
-
-                    const esp_partition_t *last_invalid_app = esp_ota_get_last_invalid_partition();
-                    esp_app_desc_t invalid_app_info;
-                    if (esp_ota_get_partition_description(last_invalid_app, &invalid_app_info) == ESP_OK)
-                    {
-                        ESP_LOGI(TAG, "Last invalid firmware version: %s", invalid_app_info.version);
-                    }
-
-                    // check current version with last invalid partition
-                    if (last_invalid_app != NULL)
-                    {
-                        if (memcmp(invalid_app_info.version, new_app_info.version, sizeof(new_app_info.version)) == 0)
-                        {
-                            ESP_LOGW(TAG, "New version is the same as invalid version.");
-                            ESP_LOGW(TAG, "Previously, there was an attempt to launch the firmware with %s version, but it failed.", invalid_app_info.version);
-                        }
-                    }
                     if (memcmp(new_app_info.version, running_app_info.version, sizeof(new_app_info.version)) == 0)
                     {
                         ESP_LOGW(TAG, "Current running version is the same as a new.");
@@ -167,7 +138,7 @@ void ota_mainthread(void *arg)
                 }
             }
         } while (len > 0);
-        
+
         ESP_LOGW(TAG, "esp_ota_end");
         err = esp_ota_end(update_handle);
         if (err != ESP_OK)
@@ -200,5 +171,22 @@ void ota_init()
     esp_log_level_set(TAG, ESP_LOG_INFO);
 
     ESP_LOGI(TAG, "Starting OTA");
-    xTaskCreatePinnedToCore(ota_mainthread, "[TB] OTA", 8192, NULL, 5, NULL, 1);
+
+    configured = esp_ota_get_boot_partition();
+    running = esp_ota_get_running_partition();
+    update_partition = esp_ota_get_next_update_partition(NULL);
+
+    ESP_LOGI(TAG, "  Configured 0x%08x '%s'", configured->address, configured->label);
+    ESP_LOGI(TAG, "  Current    0x%08x '%s'", running->address, running->label);
+
+    if (esp_ota_get_partition_description(running, &running_app_info) != ESP_OK)
+    {
+        ESP_LOGE(TAG, "Failed to fetch firmware version");
+        return;
+    }
+
+    ESP_LOGI(TAG, "  Running firmware version: %s", running_app_info.version);
+    ESP_LOGI(TAG, "  OTA partition subtype %d at offset 0x%x", update_partition->subtype, update_partition->address);
+
+    xTaskCreatePinnedToCore(ota_mainthread, "[TB] OTA", 2048, NULL, 5, NULL, 0);
 }

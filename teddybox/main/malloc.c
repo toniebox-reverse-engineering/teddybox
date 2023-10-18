@@ -2,34 +2,60 @@
 #include <string.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "esp_log.h"
 
-uint8_t opus_stack[30*1024];
+#include "esp_debug_helpers.h"
 
+#define MALLOC_BUFFERS 2
+
+uint8_t malloc_buffers[MALLOC_BUFFERS][30 * 1024];
+bool malloc_buffers_used[MALLOC_BUFFERS];
+
+static const char *TAG = "[MEM]";
 
 void *teddybox_custom_malloc(size_t size)
 {
-    if(size == sizeof(opus_stack))
+    if (size >= 25000)
     {
-        return opus_stack;
+        for (int buf = 0; buf < MALLOC_BUFFERS; buf++)
+        {
+            if (!malloc_buffers_used[buf])
+            {
+                malloc_buffers_used[buf] = true;
+                return malloc_buffers[buf];
+            }
+        }
     }
     return NULL;
 }
 
 void *teddybox_custom_calloc(size_t n, size_t size)
 {
-    if(size == sizeof(opus_stack))
+    if (size >= 25000)
     {
-        memset(opus_stack, 0x00, sizeof(opus_stack));
-        return opus_stack;
+        for (int buf = 0; buf < MALLOC_BUFFERS; buf++)
+        {
+            if (!malloc_buffers_used[buf])
+            {
+                malloc_buffers_used[buf] = true;
+                memset(malloc_buffers[buf], 0x00, sizeof(malloc_buffers[buf]));
+                return malloc_buffers[buf];
+            }
+        }
     }
     return NULL;
 }
 
 bool teddybox_custom_free(void *ptr)
 {
-    if(ptr == opus_stack)
+    for (int buf = 0; buf < MALLOC_BUFFERS; buf++)
     {
-        return true;
+        if (ptr == malloc_buffers[buf])
+        {
+            malloc_buffers_used[buf] = false;
+            return true;
+        }
     }
+
     return false;
 }

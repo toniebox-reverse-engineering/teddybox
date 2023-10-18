@@ -119,7 +119,7 @@ void app_main(void)
     ESP_LOGI(TAG, "[ 1.2 ] Mount assets");
     esp_vfs_fat_sdmmc_mount_config_t mount_config = {
         .format_if_mount_failed = false,
-        .max_files = 5};
+        .max_files = 3};
     esp_vfs_fat_spiflash_mount("/spiflash", NULL, &mount_config, &s_test_wl_handle);
 
     //dir_list("/spiflash");
@@ -151,7 +151,7 @@ void app_main(void)
     cloud_init();
     /* already too much memory consumption, do not enable by default */
     //www_init();
-    //ota_init();
+    ota_init();
 
     while (1)
     {
