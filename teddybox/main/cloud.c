@@ -22,6 +22,7 @@
 #include "lwip/dns.h"
 
 #include "cloud.h"
+#include "wifi.h"
 #include "playback.h"
 
 #define CLOUD_HOST "tc.fritz.box"
@@ -324,7 +325,8 @@ esp_err_t cloud_set_time_cbr(void *ctx, uint8_t *data, size_t length)
 esp_err_t cloud_set_time(void)
 {
     http_parser_t http_parser_handler_ctx = {
-        .http_data_cbr = &cloud_set_time_cbr};
+        .http_data_cbr = &cloud_set_time_cbr,
+        .header_buffer = malloc(MAX_HTTP_HEADER_SIZE)};
     cloud_req_t req = {
         .host = CLOUD_HOST,
         .port = 443,
@@ -332,7 +334,11 @@ esp_err_t cloud_set_time(void)
         .data_received_cbr = &http_parser_handler,
         .data_received_ctx = &http_parser_handler_ctx};
 
-    return cloud_request(&req);
+    esp_err_t ret = cloud_request(&req);
+
+    free(http_parser_handler_ctx.header_buffer);
+
+    return ret;
 }
 
 esp_err_t cloud_create_directories(const char *file)
@@ -541,10 +547,11 @@ esp_err_t cloud_process_request(cloud_content_req_t *content_req)
 
     http_parser_t http_parser_handler_ctx = {
         .http_status_cbr = &cloud_content_status_cbr,
-        .content_length_cbr = &cloud_content_length_cbr,
         .http_data_cbr = &cloud_content_cbr,
         .http_end_cbr = &cloud_content_end_cbr,
-        .ctx = content_req};
+        .content_length_cbr = &cloud_content_length_cbr,
+        .ctx = content_req,
+        .header_buffer = malloc(MAX_HTTP_HEADER_SIZE)};
 
     cloud_req_t req = {
         .host = CLOUD_HOST,
@@ -554,7 +561,11 @@ esp_err_t cloud_process_request(cloud_content_req_t *content_req)
         .data_received_cbr = &http_parser_handler,
         .data_received_ctx = &http_parser_handler_ctx};
 
-    return cloud_request(&req);
+    esp_err_t ret = cloud_request(&req);
+
+    free(http_parser_handler_ctx.header_buffer);
+
+    return ret;
 }
 
 static void cloud_task(void *ctx)
@@ -562,6 +573,12 @@ static void cloud_task(void *ctx)
     bool cloud_available = false;
     while (true)
     {
+        if(!wifi_is_connected())
+        {
+            vTaskDelay(100 / portTICK_PERIOD_MS);
+            continue;
+        }
+
         vTaskDelay(100 / portTICK_PERIOD_MS);
 
         if (!cloud_available)
@@ -602,5 +619,5 @@ void cloud_init(void)
     cloud_load_cert("/spiflash/cert/client.der", &client_der, &client_der_len);
     cloud_load_cert("/spiflash/cert/private.der", &private_der, &private_der_len);
 
-    xTaskCreate(&cloud_task, "[TB] cloud", 8000, NULL, 5, NULL);
+    xTaskCreate(&cloud_task, "[TB] cloud", 5000, NULL, 5, NULL);
 }

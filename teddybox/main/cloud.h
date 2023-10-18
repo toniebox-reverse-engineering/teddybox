@@ -1,7 +1,7 @@
 #pragma once
 
 #define MAX_HTTP_HEADER_SIZE 1024
-#define HTTP_RECEIVE_SIZE 512
+#define HTTP_RECEIVE_SIZE 1024
 
 #define CLOUD_SUCCESS_DISCONNECT -2
 
@@ -14,7 +14,7 @@ typedef struct
     void *ctx;
     size_t content_length;
     size_t received_data_length;
-    uint8_t header_buffer[MAX_HTTP_HEADER_SIZE];
+    uint8_t *header_buffer;
     size_t header_size;
     int header_parsed;
 } http_parser_t;

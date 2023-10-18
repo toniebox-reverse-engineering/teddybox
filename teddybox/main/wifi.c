@@ -28,6 +28,8 @@ static int s_ap_creds_idx = 0;
 static int s_retry_num = 0;
 static bool nvs_updated = false;
 
+static bool connected = false;
+
 static int r_ap_idx(int ap_idx)
 {
     return s_ap_creds_num - ap_idx - 1;
@@ -39,6 +41,7 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base,
     switch (event_id)
     {
     case WIFI_EVENT_STA_START:
+    connected = false;
         ESP_LOGI(TAG, "WIFI_EVENT_STA_START");
 
         if (s_ap_creds_idx < s_ap_creds_num)
@@ -62,6 +65,8 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base,
         wifi_save_nvs();
         break;
     case WIFI_EVENT_STA_DISCONNECTED:
+    
+    connected = false;
         ESP_LOGI(TAG, "WIFI_EVENT_STA_DISCONNECTED");
         if (s_retry_num < MAX_RETRY_ATTEMPTS)
         {
@@ -152,6 +157,12 @@ static void got_ip_event_handler(void *arg, esp_event_base_t event_base,
 {
     ip_event_got_ip_t *event = (ip_event_got_ip_t *)event_data;
     ESP_LOGI(TAG, "IP Address: " IPSTR, IP2STR(&event->ip_info.ip));
+    connected = true;
+}
+
+bool wifi_is_connected()
+{
+    return connected;
 }
 
 void wifi_load_nvs(void)
