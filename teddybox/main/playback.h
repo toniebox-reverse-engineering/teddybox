@@ -6,6 +6,8 @@
 #define PB_TASK_PRIO 10
 #define PB_QUEUE_SIZE 10
 
+/* minimum number of blocks to download before playback starts */
+#define PB_MIN_DL_BLOCKS 20
 
 #define CONTENT_DEFAULT_STARTUP 0x00000000
 #define CONTENT_DEFAULT_TADA 0x00000001
@@ -33,11 +35,9 @@
 #define CONTENT_DEFAULT_CODE_OWL 0x00000017
 #define CONTENT_DEFAULT_CODE_ELEPHANT 0x00000018
 
-
 #define TONIEFILE_FRAME_SIZE 4096
 #define TONIEFILE_MAX_CHAPTERS 100
 #define TONIEFILE_PAD_END 64
-
 
 void pb_init(esp_periph_set_handle_t set);
 void pb_mainthread(void *arg);
@@ -50,5 +50,7 @@ int32_t pb_get_chapter(void);
 esp_err_t pb_play(const char *uri);
 esp_err_t pb_play_default_lang(uint32_t lang, uint32_t id);
 esp_err_t pb_play_default(uint32_t id);
-esp_err_t pb_play_content(uint64_t id);
+esp_err_t pb_play_content(uint64_t nfc_uid);
+esp_err_t pb_play_content_token(uint64_t nfc_uid, const uint8_t *token);
 esp_err_t pb_stop();
+char *pb_build_filename(uint64_t id);

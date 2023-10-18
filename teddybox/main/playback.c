@@ -5,6 +5,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/queue.h"
+
 #include "esp_log.h"
 
 #include "sdkconfig.h"
@@ -20,6 +21,8 @@
 #include "board.h"
 #include "math.h"
 #include "led.h"
+#include "cloud.h"
+
 #include "toniebox.pb.taf-header.pb-c.h"
 
 audio_pipeline_handle_t pipeline;
@@ -28,6 +31,9 @@ audio_event_iface_handle_t evt;
 
 static QueueHandle_t playback_queue;
 static bool pb_default_content = false;
+static bool pb_playing = false;
+
+static cloud_content_req_t *current_dl_req = NULL;
 
 static const char *TAG = "[PB]";
 
@@ -53,24 +59,27 @@ pb_toniefile_t pb_toniefile_info;
 TonieboxAudioFileHeader *pb_toniefile_get_header(FILE *fd)
 {
     TonieboxAudioFileHeader *taf = NULL;
-    uint8_t buffer[TONIEFILE_FRAME_SIZE];
+    uint8_t *buffer = malloc(TONIEFILE_FRAME_SIZE);
     uint8_t proto_be[4];
 
     fseek(fd, 0, SEEK_SET);
 
     if (fread(proto_be, 4, 1, fd) != 1)
     {
+        free(buffer);
         ESP_LOGE(TAG, "Failed to read header size");
         return NULL;
     }
     uint32_t proto_size = (proto_be[0] << 24) | (proto_be[1] << 16) | (proto_be[2] << 8) | proto_be[3];
     if (proto_size > TONIEFILE_FRAME_SIZE)
     {
+        free(buffer);
         ESP_LOGE(TAG, "Failed to read header size");
         return NULL;
     }
     if (fread(buffer, proto_size, 1, fd) != 1)
     {
+        free(buffer);
         ESP_LOGE(TAG, "Failed to read header");
         return NULL;
     }
@@ -78,9 +87,11 @@ TonieboxAudioFileHeader *pb_toniefile_get_header(FILE *fd)
     taf = toniebox_audio_file_header__unpack(NULL, proto_size, (const uint8_t *)buffer);
     if (!taf)
     {
+        free(buffer);
         ESP_LOGE(TAG, "Failed to parse header");
         return NULL;
     }
+    free(buffer);
     return taf;
 }
 
@@ -90,21 +101,36 @@ esp_err_t pb_toniefile_open(pb_toniefile_t *info, const char *filepath)
 
     memset(info, 0x00, sizeof(pb_toniefile_t));
 
-    info->fd = fopen(filepath, "r");
-    if (!info->fd)
+    if (current_dl_req)
     {
-        ESP_LOGE(TAG, "Failed to read file: %s", filepath);
-        return ESP_FAIL;
+        while (!xSemaphoreTake(current_dl_req->file_sem, 1000 / portTICK_PERIOD_MS))
+        {
+            ESP_LOGE(TAG, "Open: Timed out waiting for file lock...");
+        }
+        info->taf = pb_toniefile_get_header(current_dl_req->handle);
+        xSemaphoreGive(current_dl_req->file_sem);
+        if (!info->taf)
+        {
+            return ESP_FAIL;
+        }
+    }
+    else
+    {
+        info->fd = fopen(filepath, "rb");
+        if (!info->fd)
+        {
+            ESP_LOGE(TAG, "Failed to read file: %s", filepath);
+            return ESP_FAIL;
+        }
+        info->taf = pb_toniefile_get_header(info->fd);
+        if (!info->taf)
+        {
+            fclose(info->fd);
+            return ESP_FAIL;
+        }
     }
 
-    info->taf = pb_toniefile_get_header(info->fd);
-    if (!info->taf)
-    {
-        fclose(info->fd);
-        return ESP_FAIL;
-    }
     info->current_pos = TONIEFILE_FRAME_SIZE;
-    fseek(info->fd, info->current_pos, SEEK_SET);
 
     ESP_LOGI(TAG, "  Audio ID: %08X", info->taf->audio_id);
     ESP_LOGI(TAG, "  Size:     %08llX", info->taf->num_bytes);
@@ -128,7 +154,11 @@ void pb_toniefile_close(pb_toniefile_t *info)
     FILE *fd = info->fd;
     info->valid = false;
     info->fd = NULL;
-    fclose(fd);
+    /* ToDo: all of that remote/local playback thing has to be coordinated. for now just leave handles open */
+    if (!current_dl_req)
+    {
+        fclose(fd);
+    }
     toniebox_audio_file_header__free_unpacked(info->taf, NULL);
     info->taf = NULL;
 }
@@ -137,7 +167,7 @@ int pb_toniefile_cbr(audio_element_handle_t self, char *buffer, int len, TickTyp
 {
     pb_toniefile_t *info = (pb_toniefile_t *)context;
 
-    if (!info || !info->valid || !info->fd)
+    if (!info || !info->valid)
     {
         ESP_LOGE(TAG, "Playback already finished, but was called again");
         return AEL_IO_DONE;
@@ -187,9 +217,7 @@ int pb_toniefile_cbr(audio_element_handle_t self, char *buffer, int len, TickTyp
         if ((info->current_pos % TONIEFILE_FRAME_SIZE) == 0)
         {
             ESP_LOGI(TAG, "Seeking possible");
-            fseek(info->fd, info->target_pos, SEEK_SET);
             info->current_pos = info->target_pos;
-
             info->target_pos = -1;
         }
         else
@@ -223,7 +251,22 @@ int pb_toniefile_cbr(audio_element_handle_t self, char *buffer, int len, TickTyp
         }
     }
 
-    int bytes_read = fread(buffer, 1, len, info->fd);
+    int bytes_read = 0;
+    if (current_dl_req)
+    {
+        while (!xSemaphoreTake(current_dl_req->file_sem, 1000 / portTICK_PERIOD_MS))
+        {
+            ESP_LOGE(TAG, "Playback: Timed out waiting for file lock...");
+        }
+        fseek(current_dl_req->handle, info->current_pos, SEEK_SET);
+        bytes_read = fread(buffer, 1, len, current_dl_req->handle);
+        xSemaphoreGive(current_dl_req->file_sem);
+    }
+    else
+    {
+        fseek(info->fd, info->current_pos, SEEK_SET);
+        bytes_read = fread(buffer, 1, len, info->fd);
+    }
 
     if (bytes_read > 0)
     {
@@ -297,51 +340,25 @@ esp_err_t pb_seek_chapter(int32_t chapters)
 /* ********************************************************************************************************************* */
 /* ********************************************************************************************************************* */
 
-void pb_init(esp_periph_set_handle_t set)
+char *pb_build_filename(uint64_t id)
 {
-    esp_log_level_set(TAG, ESP_LOG_INFO);
+    char *filename = malloc(48);
+    char *filename_ptr = filename;
 
-    playback_queue = xQueueCreate(PB_QUEUE_SIZE, sizeof(char *));
-    ESP_LOGI(TAG, "Create audio pipeline for playback");
-    audio_pipeline_cfg_t pipeline_cfg = DEFAULT_AUDIO_PIPELINE_CONFIG();
-    pipeline = audio_pipeline_init(&pipeline_cfg);
-    mem_assert(pipeline);
+    filename_ptr += sprintf(filename_ptr, "/sdcard/CONTENT/");
 
-    ESP_LOGI(TAG, "Create i2s stream to write data to codec chip");
-    i2s_stream_cfg_t i2s_cfg = I2S_STREAM_CFG_DEFAULT();
-    i2s_cfg.type = AUDIO_STREAM_WRITER;
-    i2s_cfg.i2s_config.use_apll = false;
-    i2s_cfg.i2s_config.dma_buf_count = 4;
-    i2s_cfg.i2s_config.dma_buf_len = 512;
-
-    i2s_stream_writer = i2s_stream_init(&i2s_cfg);
-
-    ESP_LOGI(TAG, "Create opus decoder");
-    opus_decoder_cfg_t opus_dec_cfg = DEFAULT_OPUS_DECODER_CONFIG();
-    opus_dec_cfg.stack_in_ext = false;
-    opus_dec_cfg.task_prio = 100;
-    music_decoder = decoder_opus_init(&opus_dec_cfg);
-
-    ESP_LOGI(TAG, "Register all elements to audio pipeline");
-    audio_pipeline_register(pipeline, music_decoder, "dec");
-    audio_pipeline_register(pipeline, i2s_stream_writer, "i2s");
-
-    ESP_LOGI(TAG, "Link it together [toniefile]-->music_decoder-->i2s_stream-->[codec_chip]");
-    const char *link_tag[2] = {"dec", "i2s"};
-    audio_pipeline_link(pipeline, &link_tag[0], 2);
-    audio_element_set_read_cb(music_decoder, &pb_toniefile_cbr, &pb_toniefile_info);
-
-    ESP_LOGI(TAG, "Set up  event listener");
-    audio_event_iface_cfg_t evt_cfg = AUDIO_EVENT_IFACE_DEFAULT_CFG();
-    evt = audio_event_iface_init(&evt_cfg);
-
-    ESP_LOGI(TAG, "Listening event from all elements of pipeline");
-    audio_pipeline_set_listener(pipeline, evt);
-
-    ESP_LOGI(TAG, "Listening event from peripherals");
-    audio_event_iface_set_listener(esp_periph_set_get_event_iface(set), evt);
-
-    xTaskCreatePinnedToCore(pb_mainthread, "pb_main", 6000, NULL, PB_TASK_PRIO, NULL, tskNO_AFFINITY);
+    for (int i = 0; i < 4; ++i)
+    {
+        uint8_t byte = (id >> (i * 8)) & 0xFF;
+        filename_ptr += sprintf(filename_ptr, "%02X", byte);
+    }
+    filename_ptr += sprintf(filename_ptr, "/");
+    for (int i = 4; i < 8; ++i)
+    {
+        uint8_t byte = (id >> (i * 8)) & 0xFF;
+        filename_ptr += sprintf(filename_ptr, "%02X", byte);
+    }
+    return filename;
 }
 
 esp_err_t pb_play(const char *uri)
@@ -381,36 +398,97 @@ esp_err_t pb_play_default(uint32_t id)
     return pb_play_default_lang(0, id);
 }
 
-/* 0x500304E0 */
-
-esp_err_t pb_play_content(uint64_t id)
+/* when being called with the token, it depends on the play state what to do */
+esp_err_t pb_play_content_token(uint64_t nfc_uid, const uint8_t *token)
 {
-    char filename[64];
-    char *filename_ptr = filename;
-
-    filename_ptr += sprintf(filename_ptr, "/sdcard/CONTENT/");
-
-    for (int i = 0; i < 4; ++i)
+    /* already playing, so no need to act here */
+    if (pb_playing)
     {
-        uint8_t byte = (id >> (i * 8)) & 0xFF;
-        filename_ptr += sprintf(filename_ptr, "%02X", byte);
+        return ESP_OK;
     }
-    filename_ptr += sprintf(filename_ptr, "/");
-    for (int i = 4; i < 8; ++i)
+
+    char *filename = pb_build_filename(nfc_uid);
+
+    struct stat st;
+    if (stat(filename, &st) != 0)
     {
-        uint8_t byte = (id >> (i * 8)) & 0xFF;
-        filename_ptr += sprintf(filename_ptr, "%02X", byte);
+        ESP_LOGI(TAG, "requested file still does not exist: '%s'", filename);
+        current_dl_req = cloud_content_download(nfc_uid, token);
+
+        bool proceed = false;
+        bool waiting = true;
+        while (waiting)
+        {
+            vTaskDelay(500 / portTICK_PERIOD_MS);
+            switch (cloud_content_get_state(current_dl_req))
+            {
+            case CC_STATE_INIT:
+            case CC_STATE_CONNECTING:
+                break;
+
+            case CC_STATE_CONNECTED:
+                ESP_LOGI(TAG, "Connected...");
+                break;
+
+            case CC_STATE_ERROR:
+                ESP_LOGE(TAG, "Download failed");
+                waiting = false;
+                proceed = false;
+                current_dl_req = NULL;
+                break;
+
+            case CC_STATE_FINISHED:
+                ESP_LOGI(TAG, "Download finished");
+                waiting = false;
+                proceed = true;
+                current_dl_req = NULL;
+                break;
+
+            case CC_STATE_RECEIVING:
+                if (current_dl_req->received / 4096 > PB_MIN_DL_BLOCKS)
+                {
+                    ESP_LOGI(TAG, "Download in progress, enough blocks received");
+                    waiting = false;
+                    proceed = true;
+                }
+                break;
+            }
+        }
+
+        if (!proceed)
+        {
+            ESP_LOGE(TAG, "...could not download the file");
+            free(filename);
+            led_set_rgb(100, 0, 0);
+            return ESP_ERR_NOT_FOUND;
+        }
+        led_set_rgb(0, 0, 100);
     }
+
+    pb_default_content = false;
+    esp_err_t ret = pb_play(filename);
+
+    free(filename);
+    return ret;
+}
+
+esp_err_t pb_play_content(uint64_t nfc_uid)
+{
+    char *filename = pb_build_filename(nfc_uid);
 
     struct stat st;
     if (stat(filename, &st) != 0)
     {
         ESP_LOGE(TAG, "requested file does not exist: '%s'", filename);
+        free(filename);
         led_set_rgb(100, 0, 0);
         return ESP_ERR_NOT_FOUND;
     }
     pb_default_content = false;
-    return pb_play(filename);
+    esp_err_t ret = pb_play(filename);
+
+    free(filename);
+    return ret;
 }
 
 esp_err_t pb_stop()
@@ -423,19 +501,48 @@ esp_err_t pb_stop()
 
 void pb_mainthread(void *arg)
 {
-    bool playing = false;
+    pb_playing = false;
     ESP_LOGI(TAG, "[ * ] Listen for all pipeline events");
 
     while (1)
     {
-        audio_event_iface_msg_t msg;
+        vTaskDelay(50 / portTICK_PERIOD_MS);
 
+        /*
+                if(current_dl_req)
+                {
+                    switch (cloud_content_get_state(current_dl_req))
+                    {
+                    case CC_STATE_INIT:
+                    case CC_STATE_CONNECTING:
+                        break;
+
+                    case CC_STATE_CONNECTED:
+                        ESP_LOGI(TAG, "Connected...");
+                        break;
+
+                    case CC_STATE_ERROR:
+                        ESP_LOGE(TAG, "Download failed, cleanup");
+                        cloud_content_cleanup(current_dl_req);
+                        current_dl_req = NULL;
+                        break;
+
+                    case CC_STATE_FINISHED:
+                        ESP_LOGI(TAG, "Download finished, cleanup");
+                        cloud_content_cleanup(current_dl_req);
+                        current_dl_req = NULL;
+                        break;
+
+                    case CC_STATE_RECEIVING:
+                        break;
+                    }
+                }
+        */
         char *item = NULL;
-
         if (xQueueReceive(playback_queue, &item, 0) == pdTRUE)
         {
             ESP_LOGI(TAG, "STOP");
-            if (playing)
+            if (pb_playing)
             {
                 audio_pipeline_pause(pipeline);
                 audio_pipeline_stop(pipeline);
@@ -443,7 +550,7 @@ void pb_mainthread(void *arg)
                 audio_pipeline_terminate(pipeline);
 
                 pb_toniefile_close(&pb_toniefile_info);
-                playing = false;
+                pb_playing = false;
             }
 
             if (item)
@@ -462,7 +569,8 @@ void pb_mainthread(void *arg)
             }
         }
 
-        if (audio_event_iface_listen(evt, &msg, 50 / portTICK_PERIOD_MS) == ESP_OK)
+        audio_event_iface_msg_t msg;
+        if (audio_event_iface_listen(evt, &msg, 0) == ESP_OK)
         {
             switch (msg.source_type)
             {
@@ -513,7 +621,6 @@ void pb_mainthread(void *arg)
                 }
                 else if (msg.cmd == AEL_MSG_CMD_REPORT_STATUS)
                 {
-                    //  &&
                     const char *source = "???";
                     if (msg.source == (void *)i2s_stream_writer)
                     {
@@ -528,7 +635,7 @@ void pb_mainthread(void *arg)
                     {
                     case AEL_STATUS_STATE_PAUSED:
                         ESP_LOGW(TAG, "[Event] [%s] Pause", source);
-                        playing = true;
+                        pb_playing = true;
                         if (!pb_default_content)
                         {
                             led_set_rgb(0, 50, 50);
@@ -536,7 +643,7 @@ void pb_mainthread(void *arg)
                         break;
                     case AEL_STATUS_STATE_RUNNING:
                         ESP_LOGW(TAG, "[Event] [%s] Run", source);
-                        playing = true;
+                        pb_playing = true;
                         if (!pb_default_content)
                         {
                             led_set_rgb(0, 50, 100);
@@ -551,7 +658,7 @@ void pb_mainthread(void *arg)
                             {
                                 led_set_rgb(0, 100, 0);
                             }
-                            playing = false;
+                            pb_playing = false;
                             audio_pipeline_reset_ringbuffer(pipeline);
                             audio_pipeline_reset_elements(pipeline);
                             audio_pipeline_change_state(pipeline, AEL_STATE_INIT);
@@ -567,6 +674,54 @@ void pb_mainthread(void *arg)
             }
         }
     }
+}
+
+void pb_init(esp_periph_set_handle_t set)
+{
+    esp_log_level_set(TAG, ESP_LOG_INFO);
+
+    playback_queue = xQueueCreate(PB_QUEUE_SIZE, sizeof(char *));
+    ESP_LOGI(TAG, "Create audio pipeline for playback");
+    audio_pipeline_cfg_t pipeline_cfg = DEFAULT_AUDIO_PIPELINE_CONFIG();
+    pipeline = audio_pipeline_init(&pipeline_cfg);
+    mem_assert(pipeline);
+
+    ESP_LOGI(TAG, "Create i2s stream to write data to codec chip");
+    i2s_stream_cfg_t i2s_cfg = I2S_STREAM_CFG_DEFAULT();
+    i2s_cfg.type = AUDIO_STREAM_WRITER;
+    i2s_cfg.i2s_config.use_apll = false;
+    i2s_cfg.i2s_config.dma_buf_count = 4;
+    i2s_cfg.i2s_config.dma_buf_len = 512;
+
+    i2s_stream_writer = i2s_stream_init(&i2s_cfg);
+
+    ESP_LOGI(TAG, "Create opus decoder");
+    opus_decoder_cfg_t opus_dec_cfg = DEFAULT_OPUS_DECODER_CONFIG();
+    opus_dec_cfg.stack_in_ext = false;
+    opus_dec_cfg.task_prio = 100;
+    opus_dec_cfg.out_rb_size = 2048;
+    music_decoder = decoder_opus_init(&opus_dec_cfg);
+
+    ESP_LOGI(TAG, "Register all elements to audio pipeline");
+    audio_pipeline_register(pipeline, music_decoder, "dec");
+    audio_pipeline_register(pipeline, i2s_stream_writer, "i2s");
+
+    ESP_LOGI(TAG, "Link it together [toniefile]-->music_decoder-->i2s_stream-->[codec_chip]");
+    const char *link_tag[2] = {"dec", "i2s"};
+    audio_pipeline_link(pipeline, &link_tag[0], 2);
+    audio_element_set_read_cb(music_decoder, &pb_toniefile_cbr, &pb_toniefile_info);
+
+    ESP_LOGI(TAG, "Set up  event listener");
+    audio_event_iface_cfg_t evt_cfg = AUDIO_EVENT_IFACE_DEFAULT_CFG();
+    evt = audio_event_iface_init(&evt_cfg);
+
+    ESP_LOGI(TAG, "Listening event from all elements of pipeline");
+    audio_pipeline_set_listener(pipeline, evt);
+
+    ESP_LOGI(TAG, "Listening event from peripherals");
+    audio_event_iface_set_listener(esp_periph_set_get_event_iface(set), evt);
+
+    xTaskCreatePinnedToCore(pb_mainthread, "[TB] Playback", 4096, NULL, PB_TASK_PRIO, NULL, tskNO_AFFINITY);
 }
 
 void pb_deinit()

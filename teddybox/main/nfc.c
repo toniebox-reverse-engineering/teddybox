@@ -5,6 +5,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/queue.h"
+
 #include "esp_log.h"
 #include "trf7962a.h"
 
@@ -19,13 +20,15 @@ static uint8_t slix_get_inventory[] = {0x26, 0x01, 0x00};
 static uint8_t slix_system_info[] = {0x22, 0x2b, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
 static uint8_t slix_set_pass[] = {0x02, 0xB3, 0x04, 0x04, 0x00, 0x00, 0x00, 0x00};
 
+static const uint32_t passes[] = {0x0F0F0F0F, 0x7FFD6E5B, 0x00000000};
 static uint8_t received_data[256];
 static uint8_t received_length;
 
 static char dump_buf[129];
 
 bool nfc_valid = false;
-uint8_t nfc_current_uid[8];
+uint8_t nfc_current_uid_rev[8];
+uint8_t nfc_current_token[32];
 
 static const char *TAG = "[NFC]";
 
@@ -35,6 +38,33 @@ typedef enum
     STATE_TAG,
     STATE_SYSINFO
 } nfc_state_t;
+
+uint64_t nfc_get_current_uid()
+{
+    if (!nfc_valid)
+    {
+        return NFC_UID_INVALID;
+    }
+    uint64_t uid = ((uint64_t)nfc_current_uid_rev[7] << 56) |
+                   ((uint64_t)nfc_current_uid_rev[6] << 48) |
+                   ((uint64_t)nfc_current_uid_rev[5] << 40) |
+                   ((uint64_t)nfc_current_uid_rev[4] << 32) |
+                   ((uint64_t)nfc_current_uid_rev[3] << 24) |
+                   ((uint64_t)nfc_current_uid_rev[2] << 16) |
+                   ((uint64_t)nfc_current_uid_rev[1] << 8) |
+                   ((uint64_t)nfc_current_uid_rev[0]);
+
+    return uid;
+}
+
+uint8_t *nfc_get_current_token()
+{
+    if (!nfc_valid)
+    {
+        return NULL;
+    }
+    return nfc_current_token;
+}
 
 void nfc_dump(char *buffer, uint8_t *data, uint8_t length)
 {
@@ -87,18 +117,16 @@ esp_err_t nfc_reset(trf7962a_t trf)
     return ESP_OK;
 }
 
+/* when token was detected, try to start playback using UID */
 static void nfc_play()
 {
-    uint64_t uid = ((uint64_t)nfc_current_uid[7] << 56) |
-                   ((uint64_t)nfc_current_uid[6] << 48) |
-                   ((uint64_t)nfc_current_uid[5] << 40) |
-                   ((uint64_t)nfc_current_uid[4] << 32) |
-                   ((uint64_t)nfc_current_uid[3] << 24) |
-                   ((uint64_t)nfc_current_uid[2] << 16) |
-                   ((uint64_t)nfc_current_uid[1] <<  8) |
-                   ((uint64_t)nfc_current_uid[0]);
+    pb_play_content(nfc_get_current_uid());
+}
 
-    pb_play_content(uid);
+/* later, when memory was read, call pb handler so it will be able to download the file */
+static void nfc_play_token()
+{
+    pb_play_content_token(nfc_get_current_uid(), nfc_get_current_token());
 }
 
 static void nfc_stop()
@@ -153,20 +181,22 @@ void nfc_mainthread(void *arg)
             if (!nfc_valid)
             {
                 nfc_valid = true;
-                memcpy(nfc_current_uid, &received_data[2], 8);
-                ESP_LOGI(TAG, "Tag entered: %s", dump_buf);
+                memcpy(nfc_current_uid_rev, &received_data[2], 8);
+                ESP_LOGI(TAG, "Tag entered: %llX", nfc_get_current_uid());
                 nfc_play();
+                vTaskDelay(1000 / portTICK_PERIOD_MS);
+                nfc_play_token();
             }
             else
             {
-                if (memcmp(nfc_current_uid, &received_data[2], 8))
+                if (memcmp(nfc_current_uid_rev, &received_data[2], 8))
                 {
-                    memcpy(nfc_current_uid, &received_data[2], 8);
-                    ESP_LOGI(TAG, "Tag changed: %s", dump_buf);
+                    memcpy(nfc_current_uid_rev, &received_data[2], 8);
+                    ESP_LOGI(TAG, "Tag changed: %llX", nfc_get_current_uid());
                     nfc_play();
                 }
             }
-            memcpy(nfc_current_uid, &received_data[2], 8);
+            memcpy(nfc_current_uid_rev, &received_data[2], 8);
             vTaskDelay(250 / portTICK_PERIOD_MS);
             break;
         }
@@ -178,7 +208,7 @@ void nfc_mainthread(void *arg)
             if (nfc_valid)
             {
                 nfc_valid = false;
-                nfc_dump(dump_buf, nfc_current_uid, 8);
+                nfc_dump(dump_buf, nfc_current_uid_rev, 8);
                 ESP_LOGI(TAG, "Tag disappeared: %s", dump_buf);
                 nfc_stop();
             }
@@ -197,7 +227,6 @@ void nfc_mainthread(void *arg)
             ESP_LOGI(TAG, "Locked tag detected");
 
             bool unlocked = false;
-            uint32_t passes[] = {0x0F0F0F0F, 0x7FFD6E5B, 0x00000000};
 
             for (int pass = 0; pass < COUNT(passes); pass++)
             {
@@ -259,5 +288,5 @@ void nfc_init()
         return;
     }
 
-    xTaskCreatePinnedToCore(nfc_mainthread, "nfc_main", 6000, trf, NFC_TASK_PRIO, NULL, tskNO_AFFINITY);
+    xTaskCreatePinnedToCore(nfc_mainthread, "[TB] NFC", 6000, trf, NFC_TASK_PRIO, NULL, tskNO_AFFINITY);
 }

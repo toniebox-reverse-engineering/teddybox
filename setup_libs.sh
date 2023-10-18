@@ -7,6 +7,7 @@ cd esp-adf
 export ADF_PATH=$PWD
 
 cd ${ADF_PATH}/esp-idf
+git apply ../../patches/malloc.diff
 ./install.sh
 
 . ./export.sh

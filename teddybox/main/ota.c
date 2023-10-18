@@ -5,6 +5,7 @@
 
 #include "esp_system.h"
 #include "esp_event.h"
+#define LOG_LOCAL_LEVEL ESP_LOG_WARN
 #include "esp_log.h"
 #include "esp_ota_ops.h"
 #include "esp_http_client.h"
@@ -199,5 +200,5 @@ void ota_init()
     esp_log_level_set(TAG, ESP_LOG_INFO);
 
     ESP_LOGI(TAG, "Starting OTA");
-    xTaskCreatePinnedToCore(ota_mainthread, "ota_main", 8192, NULL, 5, NULL, 1);
+    xTaskCreatePinnedToCore(ota_mainthread, "[TB] OTA", 8192, NULL, 5, NULL, 1);
 }

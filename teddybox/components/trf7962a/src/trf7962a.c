@@ -20,6 +20,10 @@
 static const char *TAG = "TRF7962A";
 static uint8_t tx_buffer[32];
 static uint8_t rx_buffer[32];
+static uint8_t tx_buf[8 + TRF7962A_FIFO_SIZE];
+static uint8_t rx_buf[8 + TRF7962A_FIFO_SIZE];
+static uint8_t tmp[8 + TRF7962A_FIFO_SIZE];
+static const uint8_t init_sequence[][3] = {TRF7962A_INIT_REGS};
 
 esp_err_t trf7962a_get_reg(trf7962a_t ctx, uint8_t reg, uint8_t *data, int count)
 {
@@ -178,7 +182,6 @@ esp_err_t trf7962a_read_fifo(trf7962a_t ctx, uint8_t *data, uint8_t length)
     /* TRF7960 quirk here. sloa140b.pdf 1.6: when the last bit of the read command is 1, two zero bytes
        will follow. prevent this by reading an even address and throwing away the dummy byte.
      */
-    uint8_t tmp[8 + TRF7962A_FIFO_SIZE];
     trf7962a_get_reg(ctx, REG_TX_LENGTH_BYTE_2, tmp, length + 1);
 
     memcpy(data, &tmp[1], length);
@@ -188,8 +191,6 @@ esp_err_t trf7962a_read_fifo(trf7962a_t ctx, uint8_t *data, uint8_t length)
 
 int32_t trf7962a_write_fifo(trf7962a_t ctx, bool initiate, uint8_t *data, uint16_t length)
 {
-    uint8_t tx_buf[8 + TRF7962A_FIFO_SIZE];
-    uint8_t rx_buf[8 + TRF7962A_FIFO_SIZE];
     int fifo_avail = 0;
     int tx_length = 0;
 
@@ -429,7 +430,6 @@ void trf7962a_init_regs(trf7962a_t ctx)
 {
     /* register init */
     int pos = 0;
-    uint8_t init_sequence[][3] = {TRF7962A_INIT_REGS};
     while (init_sequence[pos][0] != 0xFF)
     {
         trf7962a_set_mask(ctx, init_sequence[pos][0], init_sequence[pos][1], init_sequence[pos][2]);

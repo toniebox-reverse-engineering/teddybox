@@ -70,7 +70,7 @@ void led_init(void)
     mcpwm_init(MCPWM_UNIT_0, MCPWM_TIMER_1, &pwm_config);
     mcpwm_init(MCPWM_UNIT_0, MCPWM_TIMER_2, &pwm_config);
     
-    xTaskCreate(led_startup_task, "led_startup_task", 2048, NULL, 5, NULL);
+    xTaskCreate(led_startup_task, "[TB] LED", 2048, NULL, 5, NULL);
 }
 
 void led_set(led_t led, float pct)

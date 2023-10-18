@@ -1,0 +1,54 @@
+diff --git a/components/heap/heap_caps.c b/components/heap/heap_caps.c
+index ae5e1bfda3..2f6c72ee9f 100644
+--- a/components/heap/heap_caps.c
++++ b/components/heap/heap_caps.c
+@@ -29,6 +29,14 @@ static void *heap_caps_realloc_base( void *ptr, size_t size, uint32_t caps );
+ static void *heap_caps_calloc_base( size_t n, size_t size, uint32_t caps );
+ static void *heap_caps_malloc_base( size_t size, uint32_t caps );
+ 
++/* unfortunately the HEAP is cluttered too soon and there is no way to pin some task's
++   stack allocation to a certain address. so stack allocation fails very soon.
++   work around that here by providing fixed pointers.
++ */
++void *teddybox_custom_malloc(size_t size);
++void *teddybox_custom_calloc(size_t n, size_t size);
++bool teddybox_custom_free(void *ptr);
++
+ /*
+ This file, combined with a region allocator that supports multiple heaps, solves the problem that the ESP32 has RAM
+ that's slightly heterogeneous. Some RAM can be byte-accessed, some allows only 32-bit accesses, some can execute memory,
+@@ -124,6 +132,11 @@ IRAM_ATTR static void *heap_caps_malloc_base( size_t size, uint32_t caps)
+     if (size == 0) {
+         return NULL;
+     }
++    ret = teddybox_custom_malloc(size);
++    if(ret)
++    {
++        return ret;
++    }
+ 
+     if (size > HEAP_SIZE_MAX) {
+         // Avoids int overflow when adding small numbers to size, or
+@@ -368,6 +381,10 @@ IRAM_ATTR void heap_caps_free( void *ptr)
+     if (ptr == NULL) {
+         return;
+     }
++    if(teddybox_custom_free(ptr))
++    {
++        return;
++    }
+ 
+     if (esp_ptr_in_diram_iram(ptr)) {
+         //Memory allocated here is actually allocated in the DRAM alias region and
+@@ -483,6 +500,11 @@ IRAM_ATTR static void *heap_caps_calloc_base( size_t n, size_t size, uint32_t ca
+     if (__builtin_mul_overflow(n, size, &size_bytes)) {
+         return NULL;
+     }
++    void *ret = teddybox_custom_calloc(n, size);
++    if(ret)
++    {
++        return ret;
++    }
+ 
+     result = heap_caps_malloc_base(size_bytes, caps);
+     if (result != NULL) {
