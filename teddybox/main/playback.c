@@ -23,8 +23,6 @@
 #include "led.h"
 #include "cloud.h"
 
-#include "toniebox.pb.taf-header.pb-c.h"
-
 audio_pipeline_handle_t pipeline;
 audio_element_handle_t i2s_stream_writer, music_decoder;
 audio_event_iface_handle_t evt;
@@ -32,7 +30,7 @@ audio_event_iface_handle_t evt;
 static QueueHandle_t playback_queue;
 static bool pb_default_content = false;
 static bool pb_playing = false;
-
+static pb_toniefile_t pb_toniefile_info;
 static cloud_content_req_t *current_dl_req = NULL;
 
 static const char *TAG = "[PB]";
@@ -41,45 +39,23 @@ static const char *TAG = "[PB]";
 /* ********************************************************************************************************************* */
 /* ********************************************************************************************************************* */
 
-typedef struct
-{
-    bool valid;
-    char *filename;
-    FILE *fd;
-    int32_t current_block;
-    uint8_t current_block_buffer[TONIEFILE_FRAME_SIZE];
-    int32_t current_block_avail;
-    int32_t current_pos;
-    int32_t target_pos;
-    int32_t current_chapter;
-    int32_t target_chapter;
-    int32_t seek_blocks;
-    TonieboxAudioFileHeader *taf;
-} pb_toniefile_t;
-
-pb_toniefile_t pb_toniefile_info;
-
 TonieboxAudioFileHeader *pb_toniefile_get_header(FILE *fd)
 {
-    TonieboxAudioFileHeader *taf = NULL;
-    uint8_t *buffer = malloc(TONIEFILE_FRAME_SIZE);
-    uint8_t proto_be[4];
-
     fseek(fd, 0, SEEK_SET);
 
+    uint8_t proto_be[4];
     if (fread(proto_be, 4, 1, fd) != 1)
     {
-        free(buffer);
         ESP_LOGE(TAG, "Failed to read header size");
         return NULL;
     }
     uint32_t proto_size = (proto_be[0] << 24) | (proto_be[1] << 16) | (proto_be[2] << 8) | proto_be[3];
     if (proto_size > TONIEFILE_FRAME_SIZE)
     {
-        free(buffer);
-        ESP_LOGE(TAG, "Failed to read header size");
+        ESP_LOGE(TAG, "Invalid header size: 0x%04X", proto_size);
         return NULL;
     }
+    uint8_t *buffer = malloc(proto_size);
     if (fread(buffer, proto_size, 1, fd) != 1)
     {
         free(buffer);
@@ -87,25 +63,30 @@ TonieboxAudioFileHeader *pb_toniefile_get_header(FILE *fd)
         return NULL;
     }
 
-    taf = toniebox_audio_file_header__unpack(NULL, proto_size, (const uint8_t *)buffer);
+    TonieboxAudioFileHeader *taf = toniebox_audio_file_header__unpack(NULL, proto_size, (const uint8_t *)buffer);
+    free(buffer);
     if (!taf)
     {
-        free(buffer);
         ESP_LOGE(TAG, "Failed to parse header");
         return NULL;
     }
-    free(buffer);
+
     return taf;
 }
 
 esp_err_t pb_toniefile_open(pb_toniefile_t *info, const char *filepath)
 {
-    ESP_LOGI(TAG, "Open Toniefile: %s", filepath);
-
     memset(info, 0x00, sizeof(pb_toniefile_t));
+
+    info->filename = strdup(filepath);
 
     if (current_dl_req)
     {
+        ESP_LOGI(TAG, "Download in progress, using already open file");
+        while (current_dl_req->state < CC_STATE_RECEIVING)
+        {
+            vTaskDelay(100 / portTICK_PERIOD_MS);
+        }
         while (!xSemaphoreTake(current_dl_req->file_sem, 1000 / portTICK_PERIOD_MS))
         {
             ESP_LOGE(TAG, "Open: Timed out waiting for file lock...");
@@ -114,21 +95,25 @@ esp_err_t pb_toniefile_open(pb_toniefile_t *info, const char *filepath)
         xSemaphoreGive(current_dl_req->file_sem);
         if (!info->taf)
         {
+            free(info->filename);
             return ESP_FAIL;
         }
     }
     else
     {
-        info->fd = fopen(filepath, "rb");
+        ESP_LOGI(TAG, "Open Toniefile: %s", info->filename);
+        info->fd = fopen(info->filename, "rb");
         if (!info->fd)
         {
-            ESP_LOGE(TAG, "Failed to read file: %s", filepath);
+            ESP_LOGE(TAG, "Failed to read file: %s", info->filename);
+            free(info->filename);
             return ESP_FAIL;
         }
         info->taf = pb_toniefile_get_header(info->fd);
         if (!info->taf)
         {
             fclose(info->fd);
+            free(info->filename);
             return ESP_FAIL;
         }
     }
@@ -164,6 +149,7 @@ void pb_toniefile_close(pb_toniefile_t *info)
     }
     toniebox_audio_file_header__free_unpacked(info->taf, NULL);
     info->taf = NULL;
+    free(info->filename);
 }
 
 static size_t pb_ensure_block(pb_toniefile_t *info, FILE *fd)
@@ -409,203 +395,326 @@ esp_err_t pb_play(const char *uri)
     return ESP_OK;
 }
 
-esp_err_t pb_play_default_lang(uint32_t lang, uint32_t id)
+esp_err_t pb_check_file(const char *filename)
 {
-    char filename[64];
+    ESP_LOGI(TAG, "Check file '%s'", filename);
 
-    sprintf(filename, "/sdcard/CONTENT/%08X/%08X", lang, id);
+    /* no file at all, we have to download it */
     struct stat st;
-    if (stat(filename, &st) == 0)
+    if (stat(filename, &st) != 0)
     {
-        pb_default_content = true;
-        return pb_play(filename);
+        ESP_LOGE(TAG, "does not exist: '%s'", filename);
+        return PB_ERR_NO_FILE;
     }
-    lang = 0;
-    sprintf(filename, "/sdcard/CONTENT/%08X/%08X", lang, id);
-    if (stat(filename, &st) == 0)
+
+    if (st.st_size < TONIEFILE_FRAME_SIZE)
     {
-        pb_default_content = true;
-        return pb_play(filename);
+        ESP_LOGE(TAG, "file size: %ld", st.st_size);
+        return PB_ERR_EMPTY_FILE;
     }
-    ESP_LOGE(TAG, "requested ID does not exist: '%08X', neither in lang %d nor in default", id, lang);
-    return ESP_ERR_NOT_FOUND;
+
+    /* read details */
+    FILE *fd = fopen(filename, "rb");
+    if (!fd)
+    {
+        ESP_LOGE(TAG, "Failed to open file: '%s'", filename);
+        return PB_ERR_NO_FILE;
+    }
+
+    TonieboxAudioFileHeader *taf = pb_toniefile_get_header(fd);
+    fclose(fd);
+
+    if (!taf)
+    {
+        ESP_LOGE(TAG, "Failed to read file: '%s'", filename);
+        return PB_ERR_CORRUPTED_FILE;
+    }
+
+    esp_err_t ret = PB_ERR_GOOD_FILE;
+
+    if (st.st_size != taf->num_bytes + TONIEFILE_FRAME_SIZE)
+    {
+        ESP_LOGW(TAG, "  TAF size: %llu, file size: %ld -> partial", taf->num_bytes, st.st_size);
+        ret = PB_ERR_PARTIAL_FILE;
+    }
+    toniebox_audio_file_header__free_unpacked(taf, NULL);
+
+    return ret;
 }
 
 esp_err_t pb_play_default(uint32_t id)
 {
-    /* read language from NVS? */
-    return pb_play_default_lang(0, id);
+    pb_req_default_t *req = malloc(sizeof(pb_req_default_t));
+
+    req->hdr.type = PB_REQ_TYPE_DEFAULT;
+    req->voiceline = id;
+
+    xQueueSend(playback_queue, &req, portMAX_DELAY);
+    return ESP_OK;
 }
 
 /* when being called with the token, it depends on the play state what to do */
 esp_err_t pb_play_content_token(uint64_t nfc_uid, const uint8_t *token)
 {
-    /* already playing, so no need to act here */
+    pb_req_play_token_t *req = malloc(sizeof(pb_req_play_token_t));
+
+    req->hdr.type = PB_REQ_TYPE_PLAY_TOKEN;
+    req->uid = nfc_uid;
+    memcpy(req->token, token, 32);
+    xQueueSend(playback_queue, &req, portMAX_DELAY);
+    return ESP_OK;
+}
+
+esp_err_t pb_play_content(uint64_t nfc_uid)
+{
+    pb_req_play_t *req = malloc(sizeof(pb_req_play_t));
+
+    req->hdr.type = PB_REQ_TYPE_PLAY;
+    req->uid = nfc_uid;
+
+    xQueueSend(playback_queue, &req, portMAX_DELAY);
+    return ESP_OK;
+}
+
+esp_err_t pb_stop()
+{
+    pb_req_stop_t *req = malloc(sizeof(pb_req_stop_t));
+
+    req->hdr.type = PB_REQ_TYPE_STOP;
+
+    xQueueSend(playback_queue, &req, portMAX_DELAY);
+    return ESP_OK;
+}
+
+/********************************************************/
+/* helpers for main loop, only to be called from there  */
+/********************************************************/
+
+static esp_err_t pb_int_abort_dl()
+{
+    /* do a semi-atomic swap, so other threads do not interfere */
+    cloud_content_req_t *curr = current_dl_req;
+    current_dl_req = NULL;
+
+    if (curr)
+    {
+        ESP_LOGI(TAG, "There is a download for '%s'", curr->filename);
+        curr->abort = true;
+        while (curr->state < CC_STATE_ABORTED)
+        {
+            ESP_LOGI(TAG, "wait for abort...");
+            vTaskDelay(500 / portTICK_PERIOD_MS);
+        }
+        cloud_content_cleanup(curr);
+    }
+
+    return ESP_OK;
+}
+
+static void pb_int_stop()
+{
+    if (!pb_playing)
+    {
+        return;
+    }
+    audio_pipeline_pause(pipeline);
+    audio_pipeline_stop(pipeline);
+    audio_pipeline_wait_for_stop(pipeline);
+    audio_pipeline_terminate(pipeline);
+
+    pb_toniefile_close(&pb_toniefile_info);
+    pb_playing = false;
+    pb_default_content = false;
+
+    /* in case there is a download, also stop that one */
+    pb_int_abort_dl();
+}
+
+static esp_err_t pb_int_play_file(const char *file)
+{
+    ESP_LOGI(TAG, "Play: '%s'", file);
+
+    if (pb_toniefile_open(&pb_toniefile_info, file) != ESP_OK)
+    {
+        ESP_LOGE(TAG, "Failed to play file: '%s'", file);
+        return ESP_FAIL;
+    }
+
+    audio_pipeline_run(pipeline);
+    audio_pipeline_resume(pipeline);
+
+    return ESP_OK;
+}
+
+static esp_err_t pb_int_play_default(uint32_t lang, uint32_t id)
+{
+    char filename[64];
+
+    sprintf(filename, "/sdcard/CONTENT/%08X/%08X", lang, id);
+    if (pb_check_file(filename) == PB_ERR_GOOD_FILE)
+    {
+        pb_default_content = true;
+        return pb_int_play_file(filename);
+    }
+    lang = 0;
+
+    sprintf(filename, "/sdcard/CONTENT/%08X/%08X", lang, id);
+    if (pb_check_file(filename) == PB_ERR_GOOD_FILE)
+    {
+        pb_default_content = true;
+        return pb_int_play_file(filename);
+    }
+    ESP_LOGE(TAG, "requested ID does not exist: '%08X', neither in lang %d nor in default", id, lang);
+    return ESP_ERR_NOT_FOUND;
+}
+
+/********************************************************/
+/* handlers for main loop, only to be called from there */
+/********************************************************/
+
+static esp_err_t pb_req_handle_play(pb_req_play_t *req)
+{
+    pb_int_stop();
+
+    char *filename = pb_build_filename(req->uid);
+    esp_err_t file_state = pb_check_file(filename);
+
+    /* right now we cannot play this file, wait for token to download it */
+    if (file_state != PB_ERR_GOOD_FILE)
+    {
+        led_set_rgb(0, 0, 100);
+        return ESP_FAIL;
+    }
+
+    return ESP_OK;
+}
+
+static esp_err_t pb_req_handle_play_token(pb_req_play_token_t *req)
+{
+    /* already playing? no need to download using token */
     if (pb_playing)
     {
         return ESP_OK;
     }
 
-    char *filename = pb_build_filename(nfc_uid);
+    char *filename = pb_build_filename(req->uid);
+    esp_err_t file_state = pb_check_file(filename);
 
-    struct stat st;
-    if (stat(filename, &st) != 0)
+    /* quite unexpected. should not happen, but play anyway */
+    if (file_state == PB_ERR_GOOD_FILE)
     {
-        ESP_LOGI(TAG, "requested file still does not exist: '%s'", filename);
-        current_dl_req = cloud_content_download(nfc_uid, token);
-
-        bool proceed = false;
-        bool waiting = true;
-        while (waiting)
-        {
-            vTaskDelay(500 / portTICK_PERIOD_MS);
-            switch (cloud_content_get_state(current_dl_req))
-            {
-            case CC_STATE_INIT:
-            case CC_STATE_CONNECTING:
-                break;
-
-            case CC_STATE_CONNECTED:
-                ESP_LOGI(TAG, "Connected...");
-                break;
-
-            case CC_STATE_ERROR:
-                ESP_LOGE(TAG, "Download failed");
-                waiting = false;
-                proceed = false;
-                current_dl_req = NULL;
-                break;
-
-            case CC_STATE_FINISHED:
-                ESP_LOGI(TAG, "Download finished");
-                waiting = false;
-                proceed = true;
-                current_dl_req = NULL;
-                break;
-
-            case CC_STATE_RECEIVING:
-                if (current_dl_req->received / 4096 > PB_MIN_DL_BLOCKS)
-                {
-                    ESP_LOGI(TAG, "Download in progress, enough blocks received");
-                    waiting = false;
-                    proceed = true;
-                }
-                break;
-            }
-        }
-
-        if (!proceed)
-        {
-            ESP_LOGE(TAG, "...could not download the file");
-            free(filename);
-            led_set_rgb(100, 0, 0);
-            return ESP_ERR_NOT_FOUND;
-        }
-        led_set_rgb(0, 0, 100);
+        pb_int_play_file(filename);
+        free(filename);
+        return ESP_OK;
     }
 
-    pb_default_content = false;
-    esp_err_t ret = pb_play(filename);
+    ESP_LOGI(TAG, "requested file shall be downloaded first: '%s'", filename);
 
-    free(filename);
-    return ret;
-}
+    /* if there is already a download running, cancel it first */
+    pb_int_abort_dl();
 
-esp_err_t pb_play_content(uint64_t nfc_uid)
-{
-    char *filename = pb_build_filename(nfc_uid);
+    ESP_LOGI(TAG, "initiate download");
+    current_dl_req = cloud_content_download(req->uid, req->token);
 
-    struct stat st;
-    if (stat(filename, &st) != 0)
+    bool proceed = false;
+    bool waiting = true;
+    while (waiting)
     {
-        ESP_LOGE(TAG, "requested file does not exist: '%s'", filename);
+        vTaskDelay(100 / portTICK_PERIOD_MS);
+        switch (cloud_content_get_state(current_dl_req))
+        {
+        case CC_STATE_INIT:
+        case CC_STATE_CONNECTING:
+        case CC_STATE_ABORTED:
+            break;
+
+        case CC_STATE_CONNECTED:
+            ESP_LOGI(TAG, "Connected...");
+            break;
+
+        case CC_STATE_ERROR:
+            ESP_LOGE(TAG, "Download failed");
+            waiting = false;
+            proceed = false;
+            current_dl_req = NULL;
+            break;
+
+        case CC_STATE_FINISHED:
+            ESP_LOGI(TAG, "Download finished");
+            waiting = false;
+            proceed = true;
+            current_dl_req = NULL;
+            break;
+
+        case CC_STATE_RECEIVING:
+            if (current_dl_req->received / 4096 > PB_MIN_DL_BLOCKS)
+            {
+                ESP_LOGI(TAG, "Download in progress, enough blocks received");
+                waiting = false;
+                proceed = true;
+            }
+            break;
+        }
+    }
+
+    if (!proceed)
+    {
+        ESP_LOGE(TAG, "...could not download the file");
         free(filename);
         led_set_rgb(100, 0, 0);
         return ESP_ERR_NOT_FOUND;
     }
-    pb_default_content = false;
-    esp_err_t ret = pb_play(filename);
+    led_set_rgb(0, 0, 100);
 
-    free(filename);
-    return ret;
+    return pb_int_play_file(filename);
 }
 
-esp_err_t pb_stop()
+static esp_err_t pb_req_handle_stop(pb_req_stop_t *req)
 {
-    char *msg = NULL;
-    xQueueSend(playback_queue, &msg, portMAX_DELAY);
-
+    pb_int_stop();
     return ESP_OK;
 }
+
+static esp_err_t pb_req_handle_default(pb_req_default_t *req)
+{
+    pb_int_stop();
+    return pb_int_play_default(0, req->voiceline);
+}
+
+/********************************************************/
+/* main loop, calls functions above                     */
+/********************************************************/
 
 void pb_mainthread(void *arg)
 {
     pb_playing = false;
-    ESP_LOGI(TAG, "[ * ] Listen for all pipeline events");
+    ESP_LOGI(TAG, "Listen for all pipeline events");
 
     while (1)
     {
         vTaskDelay(50 / portTICK_PERIOD_MS);
 
-        /*
-                if(current_dl_req)
-                {
-                    switch (cloud_content_get_state(current_dl_req))
-                    {
-                    case CC_STATE_INIT:
-                    case CC_STATE_CONNECTING:
-                        break;
-
-                    case CC_STATE_CONNECTED:
-                        ESP_LOGI(TAG, "Connected...");
-                        break;
-
-                    case CC_STATE_ERROR:
-                        ESP_LOGE(TAG, "Download failed, cleanup");
-                        cloud_content_cleanup(current_dl_req);
-                        current_dl_req = NULL;
-                        break;
-
-                    case CC_STATE_FINISHED:
-                        ESP_LOGI(TAG, "Download finished, cleanup");
-                        cloud_content_cleanup(current_dl_req);
-                        current_dl_req = NULL;
-                        break;
-
-                    case CC_STATE_RECEIVING:
-                        break;
-                    }
-                }
-        */
-        char *item = NULL;
-        if (xQueueReceive(playback_queue, &item, 0) == pdTRUE)
+        pb_req_t *req = NULL;
+        if (xQueueReceive(playback_queue, &req, 0) == pdTRUE)
         {
-            ESP_LOGI(TAG, "STOP");
-            if (pb_playing)
+            switch (req->type)
             {
-                audio_pipeline_pause(pipeline);
-                audio_pipeline_stop(pipeline);
-                audio_pipeline_wait_for_stop(pipeline);
-                audio_pipeline_terminate(pipeline);
-
-                pb_toniefile_close(&pb_toniefile_info);
-                pb_playing = false;
+            case PB_REQ_TYPE_PLAY:
+                pb_req_handle_play((pb_req_play_t *)req);
+                break;
+            case PB_REQ_TYPE_PLAY_TOKEN:
+                pb_req_handle_play_token((pb_req_play_token_t *)req);
+                break;
+            case PB_REQ_TYPE_STOP:
+                pb_req_handle_stop((pb_req_stop_t *)req);
+                break;
+            case PB_REQ_TYPE_DEFAULT:
+                pb_req_handle_default((pb_req_default_t *)req);
+                break;
+            default:
+                break;
             }
-
-            if (item)
-            {
-                ESP_LOGI(TAG, "Play: '%s'", item);
-                if (pb_toniefile_open(&pb_toniefile_info, item) != ESP_OK)
-                {
-                    ESP_LOGE(TAG, "Failed to read file: '%s'", item);
-                }
-                else
-                {
-                    audio_pipeline_run(pipeline);
-                    audio_pipeline_resume(pipeline);
-                }
-                free(item);
-            }
+            free(req);
         }
 
         audio_event_iface_msg_t msg;

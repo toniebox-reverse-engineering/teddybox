@@ -131,7 +131,7 @@ void app_main(void)
 
     pb_init(set);
     
-    xTaskCreate(print_all_tasks, "print_all_tasks", 4096, NULL, 5, NULL);
+    //xTaskCreate(print_all_tasks, "print_all_tasks", 4096, NULL, 5, NULL);
 
     int volume = 30;
     audio_hal_set_volume(audio_board_get_hal(), volume);

@@ -2,6 +2,7 @@
 #pragma once
 
 #include "esp_peripherals.h"
+#include "toniebox.pb.taf-header.pb-c.h"
 
 #define PB_TASK_PRIO 10
 #define PB_QUEUE_SIZE 10
@@ -38,6 +39,63 @@
 #define TONIEFILE_FRAME_SIZE 4096
 #define TONIEFILE_MAX_CHAPTERS 100
 #define TONIEFILE_PAD_END 64
+
+#define PB_ERR_GOOD_FILE 0x8100
+#define PB_ERR_NO_FILE 0x8101
+#define PB_ERR_EMPTY_FILE 0x8102
+#define PB_ERR_CORRUPTED_FILE 0x8103
+#define PB_ERR_PARTIAL_FILE 0x8104
+
+#define PB_REQ_TYPE_PLAY 1
+#define PB_REQ_TYPE_PLAY_TOKEN 2
+#define PB_REQ_TYPE_STOP 3
+#define PB_REQ_TYPE_DEFAULT 4
+
+typedef struct 
+{
+    uint32_t type;
+} pb_req_t;
+
+typedef struct 
+{
+    pb_req_t hdr;
+    uint32_t voiceline;
+} pb_req_default_t;
+
+typedef struct 
+{
+    pb_req_t hdr;
+    uint64_t uid;
+} pb_req_play_t;
+
+typedef struct 
+{
+    pb_req_t hdr;
+    uint64_t uid;
+    uint8_t token[32];
+} pb_req_play_token_t;
+
+typedef struct 
+{
+    pb_req_t hdr;
+} pb_req_stop_t;
+
+
+typedef struct
+{
+    bool valid;
+    char *filename;
+    FILE *fd;
+    int32_t current_block;
+    uint8_t current_block_buffer[TONIEFILE_FRAME_SIZE];
+    int32_t current_block_avail;
+    int32_t current_pos;
+    int32_t target_pos;
+    int32_t current_chapter;
+    int32_t target_chapter;
+    int32_t seek_blocks;
+    TonieboxAudioFileHeader *taf;
+} pb_toniefile_t;
 
 void pb_init(esp_periph_set_handle_t set);
 void pb_mainthread(void *arg);

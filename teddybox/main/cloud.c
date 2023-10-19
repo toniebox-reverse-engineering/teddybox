@@ -38,7 +38,23 @@ size_t private_der_len = 0;
 static esp_app_desc_t running_app_info;
 static QueueHandle_t cloud_request_queue;
 
-esp_err_t http_parser_handler(void *ctx, uint8_t *data, size_t length)
+/********************************************************/
+/* HTTP parser handling routines                        */
+/********************************************************/
+
+esp_err_t http_parser_closed_cbr(void *ctx)
+{
+    http_parser_t *parser_ctx = (http_parser_t *)ctx;
+
+    if (parser_ctx->http_end_cbr)
+    {
+        parser_ctx->http_end_cbr(parser_ctx->ctx);
+    }
+
+    return ESP_OK;
+}
+
+esp_err_t http_parser_received_cbr(void *ctx, uint8_t *data, size_t length)
 {
     esp_err_t ret = ESP_OK;
     http_parser_t *parser_ctx = (http_parser_t *)ctx;
@@ -57,9 +73,9 @@ esp_err_t http_parser_handler(void *ctx, uint8_t *data, size_t length)
         char *header_end = strstr((char *)parser_ctx->header_buffer, "\r\n\r\n");
         if (header_end)
         {
-            //ESP_LOGI(TAG, "Found end of header");
+            uint32_t status_code = 0;
+            uint32_t content_length = 0;
 
-            int status_code;
             if (sscanf((char *)parser_ctx->header_buffer, "HTTP/1.1 %d ", &status_code) == 1)
             {
                 ESP_LOGI(TAG, "Parsed HTTP Status Code: %d", status_code);
@@ -73,22 +89,34 @@ esp_err_t http_parser_handler(void *ctx, uint8_t *data, size_t length)
                 }
             }
 
+            size_t start_byte = 0;
+            size_t end_byte = 0;
+            size_t total_bytes = 0;
+            char *content_range_str = strstr((char *)parser_ctx->header_buffer, "Content-Range: ");
+            if (content_range_str)
+            {
+                sscanf(content_range_str, "Content-Range: bytes %zu-%zu/%zu", &start_byte, &end_byte, &total_bytes);
+                ESP_LOGI(TAG, "Parsed Content-Range: start=%zu, end=%zu, total=%zu", start_byte, end_byte, total_bytes);
+            }
+
             char *content_length_str = strstr((char *)parser_ctx->header_buffer, "Content-Length: ");
             if (content_length_str)
             {
-                sscanf(content_length_str, "Content-Length: %zu", &parser_ctx->content_length);
-                ESP_LOGI(TAG, "Parsed Content-Length: %zu", parser_ctx->content_length);
+                sscanf(content_length_str, "Content-Length: %zu", &content_length);
+                ESP_LOGI(TAG, "Parsed Content-Length: %zu", content_length);
+            }
 
-                if (parser_ctx->content_length_cbr)
+            parser_ctx->content_length = content_length;
+            parser_ctx->header_parsed = 1;
+
+            if (parser_ctx->content_length_cbr)
+            {
+                ret = parser_ctx->content_length_cbr(parser_ctx->ctx, start_byte, parser_ctx->content_length);
+                if (ret)
                 {
-                    ret = parser_ctx->content_length_cbr(parser_ctx->ctx, parser_ctx->content_length);
-                    if (ret)
-                    {
-                        return ret;
-                    }
+                    return ret;
                 }
             }
-            parser_ctx->header_parsed = 1;
 
             uint8_t *content_start = (uint8_t *)(header_end + 4);
             size_t content_size = parser_ctx->header_size - (content_start - parser_ctx->header_buffer);
@@ -122,49 +150,23 @@ esp_err_t http_parser_handler(void *ctx, uint8_t *data, size_t length)
             {
                 parser_ctx->http_end_cbr(parser_ctx->ctx);
             }
-            return CLOUD_SUCCESS_DISCONNECT;
+            return CBR_CLOSE_OK;
         }
     }
 
     return ret;
 }
 
-esp_err_t cloud_load_cert(const char *path, uint8_t **ptr, size_t *length)
-{
-    struct stat st;
-    if (stat(path, &st) != 0)
-    {
-        ESP_LOGE(TAG, "Certificate %s not found", path);
-        return ESP_FAIL;
-    }
-
-    *ptr = malloc(st.st_size);
-    *length = st.st_size;
-
-    FILE *ca = fopen(path, "rb");
-    if (!ca)
-    {
-        ESP_LOGE(TAG, "Certificate %s not found", path);
-        return ESP_FAIL;
-    }
-
-    if (fread(*ptr, *length, 1, ca) != 1)
-    {
-        ESP_LOGE(TAG, "Failed to read certificate");
-        return ESP_FAIL;
-    }
-    ESP_LOGI(TAG, "Loaded '%s' with %d bytes", path, *length);
-
-    return ESP_OK;
-}
+/********************************************************/
+/* TLS connection handling                              */
+/********************************************************/
 
 static esp_err_t cloud_request(cloud_req_t *req)
 {
     esp_err_t ret = ESP_FAIL;
 
-    ESP_LOGI(TAG, "New request");
-
     char *auth_line = strdup("");
+    char *range_line = strdup("");
     char *request;
     char *url;
 
@@ -173,17 +175,23 @@ static esp_err_t cloud_request(cloud_req_t *req)
         free(auth_line);
         asprintf(&auth_line, "Authorization: BD %s\r\n", req->auth);
     }
+    if (req->range_start)
+    {
+        free(range_line);
+        asprintf(&range_line, "Range: bytes=%d-\r\n", req->range_start);
+    }
     asprintf(&url, "https://%s:%d%s", req->host, req->port, req->path);
     ESP_LOGI(TAG, "Connect to %s...", url);
 
     asprintf(&request, "GET %s HTTP/1.1\r\n"
                        "Host: %s\r\n"
                        "%s"
+                       "%s"
                        "User-Agent: teddybox/1.0 (ESP32) %s\r\n"
                        "\r\n",
-             req->path, req->host, auth_line, running_app_info.version);
+             req->path, req->host, auth_line, range_line, running_app_info.version);
 
-    //ESP_LOGI(TAG, "Header %s...", request);
+    ESP_LOGI(TAG, "Header %s...", request);
     esp_tls_cfg_t cfg = {
         .cacert_buf = ca_der,
         .cacert_bytes = ca_der_len,
@@ -199,14 +207,15 @@ static esp_err_t cloud_request(cloud_req_t *req)
         ESP_LOGE(TAG, "Allocation failed...");
         return ESP_FAIL;
     }
-    struct esp_tls *tls = esp_tls_conn_http_new(url, &cfg);
 
+    struct esp_tls *tls = esp_tls_conn_http_new(url, &cfg);
     if (!tls)
     {
         ESP_LOGE(TAG, "Connection failed...");
         goto exit;
     }
-    ESP_LOGI(TAG, "Connection to %s established...", url);
+
+    ESP_LOGI(TAG, "Connection to '%s' established...", req->host);
 
     size_t written_bytes = 0;
     size_t request_len = strlen(request);
@@ -215,7 +224,6 @@ static esp_err_t cloud_request(cloud_req_t *req)
         int ret = esp_tls_conn_write(tls, request + written_bytes, request_len - written_bytes);
         if (ret >= 0)
         {
-            //ESP_LOGI(TAG, "%d bytes request written", ret);
             written_bytes += ret;
         }
         else if (ret != ESP_TLS_ERR_SSL_WANT_READ && ret != ESP_TLS_ERR_SSL_WANT_WRITE)
@@ -225,8 +233,9 @@ static esp_err_t cloud_request(cloud_req_t *req)
         }
     } while (written_bytes < request_len);
 
-    //ESP_LOGI(TAG, "Reading HTTP response...");
     bool connected = true;
+
+    ret = ESP_OK;
 
     while (connected)
     {
@@ -234,7 +243,7 @@ static esp_err_t cloud_request(cloud_req_t *req)
 
         if (len == ESP_TLS_ERR_SSL_WANT_WRITE || len == ESP_TLS_ERR_SSL_WANT_READ)
         {
-            ESP_LOGI(TAG, "continue");
+            ESP_LOGI(TAG, "TLS socket idle");
             continue;
         }
 
@@ -245,30 +254,42 @@ static esp_err_t cloud_request(cloud_req_t *req)
             {
                 req->connection_closed_cbr(req->connection_closed_ctx);
             }
+            ret = ESP_FAIL;
             connected = false;
-            break;
+            continue;
         }
 
         if (len == 0)
         {
-            ESP_LOGI(TAG, "connection closed");
-            if (req->connection_closed_cbr)
-            {
-                req->connection_closed_cbr(req->connection_closed_ctx);
-            }
             connected = false;
-            break;
+            continue;
         }
 
         if (req->data_received_cbr)
         {
-            connected = (req->data_received_cbr(req->data_received_ctx, receive_buffer, len) == ESP_OK);
+            esp_err_t cbr_ret = req->data_received_cbr(req->data_received_ctx, receive_buffer, len);
+
+            switch (cbr_ret)
+            {
+            case ESP_OK:
+                break;
+
+            case ESP_FAIL:
+                ret = ESP_FAIL;
+                connected = false;
+                continue;
+
+            case CBR_CLOSE_OK:
+                connected = false;
+                continue;
+            }
         }
-        else
-        {
-            //ESP_LOGI(TAG, "%d bytes received", len);
-        }
-        ret = ESP_OK;
+    }
+
+    ESP_LOGI(TAG, "connection closed");
+    if (req->connection_closed_cbr)
+    {
+        req->connection_closed_cbr(req->connection_closed_ctx);
     }
 
 exit:
@@ -281,6 +302,10 @@ exit:
 
     return ret;
 }
+
+/********************************************************/
+/* time request handler                                 */
+/********************************************************/
 
 esp_err_t cloud_set_time_cbr(void *ctx, uint8_t *data, size_t length)
 {
@@ -319,7 +344,7 @@ esp_err_t cloud_set_time_cbr(void *ctx, uint8_t *data, size_t length)
     strftime(buffer, sizeof(buffer), "%Y-%m-%d %H:%M:%S", timeInfo);
     ESP_LOGI(TAG, "Current Date and Time: %s", buffer);
 
-    return ESP_FAIL;
+    return CBR_CLOSE_OK;
 }
 
 esp_err_t cloud_set_time(void)
@@ -331,7 +356,7 @@ esp_err_t cloud_set_time(void)
         .host = CLOUD_HOST,
         .port = 443,
         .path = "/v1/time",
-        .data_received_cbr = &http_parser_handler,
+        .data_received_cbr = &http_parser_received_cbr,
         .data_received_ctx = &http_parser_handler_ctx};
 
     esp_err_t ret = cloud_request(&req);
@@ -340,6 +365,10 @@ esp_err_t cloud_set_time(void)
 
     return ret;
 }
+
+/********************************************************/
+/* content download handler                             */
+/********************************************************/
 
 esp_err_t cloud_create_directories(const char *file)
 {
@@ -373,6 +402,13 @@ esp_err_t cloud_content_status_cbr(void *ctx, int status_code)
         xSemaphoreGive(req->update_sem);
         return ESP_OK;
 
+    case 206:
+        ESP_LOGI(TAG, "[CDL] HTTP %d received, partial content", req->status_code);
+
+        req->state = CC_STATE_CONNECTED;
+        xSemaphoreGive(req->update_sem);
+        return ESP_OK;
+
     default:
         ESP_LOGE(TAG, "[CDL] Request failed for '%s': HTTP %d", req->location, req->status_code);
 
@@ -382,20 +418,20 @@ esp_err_t cloud_content_status_cbr(void *ctx, int status_code)
     }
 }
 
-esp_err_t cloud_content_length_cbr(void *ctx, size_t content_length)
+esp_err_t cloud_content_length_cbr(void *ctx, size_t content_range, size_t content_length)
 {
     cloud_content_req_t *req = (cloud_content_req_t *)ctx;
+
+    req->received = content_range;
     req->content_length = content_length;
 
-    ESP_LOGI(TAG, "[CDL] %d bytes total to download to '%s'", req->content_length, req->filename);
+    ESP_LOGI(TAG, "[CDL] download %d-%d to '%s'", req->received, req->content_length, req->filename);
 
     if (req->content_length == 0)
     {
         ESP_LOGE(TAG, "[CDL] Zero-sized download, aborting");
         return ESP_FAIL;
     }
-
-    req->state = CC_STATE_RECEIVING;
 
     cloud_create_directories(req->filename);
     req->handle = fopen(req->filename, "wb+");
@@ -404,6 +440,8 @@ esp_err_t cloud_content_length_cbr(void *ctx, size_t content_length)
         ESP_LOGE(TAG, "[CDL] Failed to create '%s'", req->filename);
         return ESP_FAIL;
     }
+
+    req->state = CC_STATE_RECEIVING;
 
     return ESP_OK;
 }
@@ -415,6 +453,13 @@ esp_err_t cloud_content_cbr(void *ctx, uint8_t *data, size_t length)
     if (req->content_length == 0 || !req->handle)
     {
         ESP_LOGE(TAG, "[CDL] Nothing allocated... aborting");
+        return ESP_FAIL;
+    }
+
+    if (req->abort)
+    {
+        req->state = CC_STATE_ABORTED;
+        ESP_LOGE(TAG, "[CDL] aborting requested");
         return ESP_FAIL;
     }
 
@@ -473,6 +518,40 @@ esp_err_t cloud_content_end_cbr(void *ctx)
     return ESP_OK;
 }
 
+esp_err_t cloud_process_request(cloud_content_req_t *content_req)
+{
+    ESP_LOGI(TAG, "[CDL] Request for '%s' -> '%s'", content_req->location, content_req->filename);
+
+    http_parser_t http_parser_handler_ctx = {
+        .http_status_cbr = &cloud_content_status_cbr,
+        .http_data_cbr = &cloud_content_cbr,
+        .http_end_cbr = &cloud_content_end_cbr,
+        .content_length_cbr = &cloud_content_length_cbr,
+        .ctx = content_req,
+        .header_buffer = malloc(MAX_HTTP_HEADER_SIZE)};
+
+    cloud_req_t req = {
+        .host = CLOUD_HOST,
+        .port = 443,
+        .path = content_req->location,
+        .auth = content_req->auth,
+        .range_start = content_req->received,
+        .data_received_cbr = &http_parser_received_cbr,
+        .data_received_ctx = &http_parser_handler_ctx,
+        .connection_closed_cbr = &http_parser_closed_cbr,
+        .connection_closed_ctx = &http_parser_handler_ctx};
+
+    esp_err_t ret = cloud_request(&req);
+
+    free(http_parser_handler_ctx.header_buffer);
+
+    return ret;
+}
+
+/********************************************************/
+/* cloud request code, called from external code        */
+/********************************************************/
+
 cloud_content_req_t *cloud_content_download(uint64_t nfc_uid, const uint8_t *nfc_token)
 {
     cloud_content_req_t *req = calloc(1, sizeof(cloud_content_req_t));
@@ -492,6 +571,14 @@ cloud_content_req_t *cloud_content_download(uint64_t nfc_uid, const uint8_t *nfc
     req->location = malloc(64);
     req->filename = pb_build_filename(nfc_uid);
     req->auth = malloc(65);
+
+    /* when the file already exists, do a partial download */
+    struct stat st;
+    if (stat(req->filename, &st) == 0)
+    {
+        req->received = st.st_size;
+        ESP_LOGI(TAG, "[CDL] Partial file, continue at %d", req->received);
+    }
 
     xSemaphoreGive(req->file_sem);
 
@@ -541,31 +628,37 @@ void cloud_content_cleanup(cloud_content_req_t *req)
     free(req);
 }
 
-esp_err_t cloud_process_request(cloud_content_req_t *content_req)
+/********************************************************/
+/* certificate loading                                  */
+/********************************************************/
+
+esp_err_t cloud_load_cert(const char *path, uint8_t **ptr, size_t *length)
 {
-    ESP_LOGI(TAG, "[CDL] Request for '%s' -> '%s'", content_req->location, content_req->filename);
+    struct stat st;
+    if (stat(path, &st) != 0)
+    {
+        ESP_LOGE(TAG, "Certificate %s not found", path);
+        return ESP_FAIL;
+    }
 
-    http_parser_t http_parser_handler_ctx = {
-        .http_status_cbr = &cloud_content_status_cbr,
-        .http_data_cbr = &cloud_content_cbr,
-        .http_end_cbr = &cloud_content_end_cbr,
-        .content_length_cbr = &cloud_content_length_cbr,
-        .ctx = content_req,
-        .header_buffer = malloc(MAX_HTTP_HEADER_SIZE)};
+    *ptr = malloc(st.st_size);
+    *length = st.st_size;
 
-    cloud_req_t req = {
-        .host = CLOUD_HOST,
-        .port = 443,
-        .path = content_req->location,
-        .auth = content_req->auth,
-        .data_received_cbr = &http_parser_handler,
-        .data_received_ctx = &http_parser_handler_ctx};
+    FILE *ca = fopen(path, "rb");
+    if (!ca)
+    {
+        ESP_LOGE(TAG, "Certificate %s not found", path);
+        return ESP_FAIL;
+    }
 
-    esp_err_t ret = cloud_request(&req);
+    if (fread(*ptr, *length, 1, ca) != 1)
+    {
+        ESP_LOGE(TAG, "Failed to read certificate");
+        return ESP_FAIL;
+    }
+    ESP_LOGI(TAG, "Loaded '%s' with %d bytes", path, *length);
 
-    free(http_parser_handler_ctx.header_buffer);
-
-    return ret;
+    return ESP_OK;
 }
 
 static void cloud_task(void *ctx)
@@ -573,7 +666,7 @@ static void cloud_task(void *ctx)
     bool cloud_available = false;
     while (true)
     {
-        if(!wifi_is_connected())
+        if (!wifi_is_connected())
         {
             vTaskDelay(100 / portTICK_PERIOD_MS);
             continue;

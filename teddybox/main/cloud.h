@@ -1,16 +1,15 @@
 #pragma once
 
 #define MAX_HTTP_HEADER_SIZE 1024
-#define HTTP_RECEIVE_SIZE 1024
+#define HTTP_RECEIVE_SIZE 1600
 
-#define CLOUD_SUCCESS_DISCONNECT -2
 
 typedef struct
 {
     esp_err_t (*http_status_cbr)(void *ctx, int status_code);
     esp_err_t (*http_data_cbr)(void *ctx, uint8_t *data, size_t length);
     esp_err_t (*http_end_cbr)(void *ctx);
-    esp_err_t (*content_length_cbr)(void *ctx, size_t content_length);
+    esp_err_t (*content_length_cbr)(void *ctx, size_t content_range, size_t content_length);
     void *ctx;
     size_t content_length;
     size_t received_data_length;
@@ -25,6 +24,7 @@ typedef struct
     uint16_t port;
     const char *path;
     const char *auth;
+    uint32_t range_start;
     esp_err_t (*data_received_cbr)(void *ctx, uint8_t *data, size_t length);
     void *data_received_ctx;
     esp_err_t (*connection_closed_cbr)(void *ctx);
@@ -37,14 +37,21 @@ typedef enum
     CC_STATE_CONNECTING,
     CC_STATE_CONNECTED,
     CC_STATE_RECEIVING,
+    CC_STATE_ABORTED,
     CC_STATE_FINISHED,
     CC_STATE_ERROR
 } cloud_content_state_t;
+
+typedef enum
+{
+    CBR_CLOSE_OK = 0x1000
+} cloud_cbr_err_t;
 
 typedef struct
 {
     /* input fields filled by requester */
     uint64_t nfc_uid;
+    bool abort;
 
     /* working variables for the download handler */
     char *location;
