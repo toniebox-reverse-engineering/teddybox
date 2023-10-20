@@ -314,9 +314,8 @@ esp_err_t dac3100_init(audio_hal_codec_config_t *cfg)
     // dac3100_write_reg(L_VOL_TO_SPK, 0x80);
     dac3100_write_reg(DAC_VOL_CTRL, 0x00);
 
-    dac3100_set_gain(3);
+    dac3100_set_gain(1);
     dac3100_set_mute(true);
-
 
     return ESP_OK;
 }
