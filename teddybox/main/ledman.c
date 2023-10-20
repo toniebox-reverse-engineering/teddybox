@@ -21,6 +21,7 @@ const State states[] = {
 
     {.name = "on", .seq = (const SequenceCommand[]){SET_COLOR(0, 100, 0), END()}},
     {.name = "off", .seq = (const SequenceCommand[]){SET_COLOR(0, 0, 0), END()}},
+    {.name = "fade off", .seq = (const SequenceCommand[]){FADE(0, 0, 0, 500, 10), END()}},
 
     {.name = "red", .seq = (const SequenceCommand[]){SET_COLOR(100, 0, 0), END()}},
     {.name = "green", .seq = (const SequenceCommand[]){SET_COLOR(0, 100, 0), END()}},
@@ -59,6 +60,7 @@ typedef struct
 static const StateMapping *stateMappings[NUM_SYSTEM_STATES] = {
     [SYSTEM_NORMAL] = (const StateMapping[]){
         {"off", "off"},
+        {"poweroff", "fade off"},
         {"idle", "fade green"},
         {"checking", "fadeblink blue-green"},
         {"playing", "green"},
@@ -67,6 +69,7 @@ static const StateMapping *stateMappings[NUM_SYSTEM_STATES] = {
         {NULL, NULL}},
     [SYSTEM_OFFLINE] = (const StateMapping[]) {
         {"off", "off"},
+        {"poweroff", "fade off"},
         {"idle", "white"},
         {"checking", "fadeblink blue-green"},
         {"playing", "green"},
@@ -75,6 +78,7 @@ static const StateMapping *stateMappings[NUM_SYSTEM_STATES] = {
         {NULL, NULL}},
     [SYSTEM_LOWBATT] = (const StateMapping[]){
         {"off", "off"},
+        {"poweroff", "fade off"},
         {"idle", "rose"},
         {"checking", "fadeblink blue-red"},
         {"playing", "fadeblink green-red"},

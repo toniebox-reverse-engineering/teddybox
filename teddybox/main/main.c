@@ -136,7 +136,7 @@ void app_main(void)
     audio_hal_set_volume(audio_board_get_hal(), volume);
 
     ESP_LOGI(TAG, "[ 4 ] detect headset");
-    dac3100_set_mute(dac3100_headset_detected());
+    dac3100_set_mute(true);
 
     ESP_LOGI(TAG, "[ 5 ] play startup sound");
     pb_play_default(CONTENT_DEFAULT_STARTUP);
@@ -152,18 +152,11 @@ void app_main(void)
     // www_init();
     ota_init();
 
-    time_t last_activity_time = time(NULL);
+    int64_t last_activity_time = esp_timer_get_time();
 
     while (1)
     {
         vTaskDelay(100 / portTICK_PERIOD_MS);
-
-        if (board_headset_irq())
-        {
-            uint8_t type = dac3100_headset_detected();
-            ESP_LOGI(TAG, "Headset detected: %s", type ? "YES" : "NO");
-            dac3100_set_mute(type);
-        }
 
         bool ear_big = audio_board_ear_big();
         bool ear_small = audio_board_ear_small();
@@ -202,10 +195,10 @@ void app_main(void)
 
         if (pb_is_playing() || ear_big || ear_small)
         {
-            last_activity_time = time(NULL);
+            last_activity_time = esp_timer_get_time();
         }
 
-        if (time(NULL) - last_activity_time > POWEROFF_TIMEOUT)
+        if ((esp_timer_get_time() - last_activity_time) > POWEROFF_TIMEOUT)
         {
             break;
         }
@@ -214,10 +207,12 @@ void app_main(void)
         ear_small_prev = ear_small;
     }
 
+    ledman_change("poweroff");
     audio_board_sdcard_unmount();
 
     ESP_LOGI(TAG, "Poweroff");
+    vTaskDelay(500 / portTICK_PERIOD_MS);
     audio_board_poweroff();
-    
+
     ESP_LOGE(TAG, "back, quite unexpected...");
 }

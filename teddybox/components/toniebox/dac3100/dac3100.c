@@ -323,6 +323,8 @@ esp_err_t dac3100_init(audio_hal_codec_config_t *cfg)
 
 esp_err_t dac3100_deinit(void)
 {
+    dac3100_write_reg(PAGE_CONTROL, SERIAL_IO);
+    dac3100_write_reg(SOFTWARE_RESET, 0x01);
     return ESP_OK;
 }
 

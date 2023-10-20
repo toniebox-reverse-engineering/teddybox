@@ -18,6 +18,7 @@
 #include "raw_stream.h"
 
 #include "playback.h"
+#include "dac3100.h"
 #include "board.h"
 #include "math.h"
 #include "ledman.h"
@@ -710,6 +711,13 @@ void pb_mainthread(void *arg)
     {
         vTaskDelay(50 / portTICK_PERIOD_MS);
 
+        if (board_headset_irq())
+        {
+            uint8_t type = dac3100_headset_detected();
+            ESP_LOGI(TAG, "Headset detected: %s", type ? "YES" : "NO");
+            dac3100_set_mute(!pb_is_playing() || type);
+        }
+
         pb_req_t *req = NULL;
         if (xQueueReceive(playback_queue, &req, 0) == pdTRUE)
         {
@@ -800,6 +808,7 @@ void pb_mainthread(void *arg)
                     case AEL_STATUS_STATE_PAUSED:
                         ESP_LOGW(TAG, "[Event] [%s] Pause", source);
                         pb_playing = true;
+                        dac3100_set_mute(true);
                         if (!pb_default_content)
                         {
                             ledman_change("idle");
@@ -808,6 +817,7 @@ void pb_mainthread(void *arg)
                     case AEL_STATUS_STATE_RUNNING:
                         ESP_LOGW(TAG, "[Event] [%s] Run", source);
                         pb_playing = true;
+                        dac3100_set_mute(dac3100_headset_detected());
                         if (!pb_default_content)
                         {
                             if (current_dl_req)
@@ -825,6 +835,7 @@ void pb_mainthread(void *arg)
                         ESP_LOGW(TAG, "[Event] [%s] Stop", source);
                         if (msg.source == (void *)i2s_stream_writer)
                         {
+                            dac3100_set_mute(true);
                             if (!pb_default_content)
                             {
                                 ledman_change("idle");

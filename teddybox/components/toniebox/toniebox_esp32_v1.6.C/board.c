@@ -286,6 +286,7 @@ void audio_board_power(bool state)
 
 void audio_board_poweroff()
 {
+    dac3100_deinit();
     audio_board_power(false);
     esp_sleep_enable_ext0_wakeup(WAKEUP_GPIO, 0);
     esp_deep_sleep_start();
