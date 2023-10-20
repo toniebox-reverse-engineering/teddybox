@@ -391,6 +391,8 @@ esp_err_t trf7962a_xmit(trf7962a_t ctx, uint8_t *tx_data, uint8_t tx_length, uin
     }
     ESP_LOGD(TAG, "Rx finished, %d bytes read", *rx_length);
 
+    /* ToDo: check for invalid checksum */
+
     return ESP_OK;
 }
 

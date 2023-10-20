@@ -191,7 +191,7 @@ static esp_err_t cloud_request(cloud_req_t *req)
                        "\r\n",
              req->path, req->host, auth_line, range_line, running_app_info.version);
 
-    ESP_LOGI(TAG, "Header %s...", request);
+    //ESP_LOGI(TAG, "Header %s...", request);
     esp_tls_cfg_t cfg = {
         .cacert_buf = ca_der,
         .cacert_bytes = ca_der_len,

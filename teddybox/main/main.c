@@ -33,6 +33,7 @@
 #include "ota.h"
 #include "nfc.h"
 #include "cloud.h"
+#include "ledman.h"
 
 #include "esp_heap_trace.h"
 
@@ -69,7 +70,7 @@ void print_all_tasks(void *params)
         if (taskStatusArray != NULL)
         {
             taskCount = uxTaskGetSystemState(taskStatusArray, taskCount, NULL);
-            
+
             free_heap_size = esp_get_free_heap_size();
             ESP_LOGI(TAG, "Task Count:     %d", taskCount);
             ESP_LOGI(TAG, "Free Heap Size: %d", free_heap_size);
@@ -104,17 +105,15 @@ void app_main(void)
     esp_log_level_set("*", ESP_LOG_WARN);
     esp_log_level_set(TAG, ESP_LOG_INFO);
 
-
     esp_periph_config_t periph_cfg = DEFAULT_ESP_PERIPH_SET_CONFIG();
     esp_periph_set_handle_t set = esp_periph_set_init(&periph_cfg);
 
     ESP_LOGI(TAG, "[ 1.0 ] Board init");
     audio_board_handle_t board_handle = audio_board_init();
+    ledman_init();
 
     ESP_LOGI(TAG, "[ 1.1 ] Mount sdcard");
     audio_board_sdcard_init(set, SD_MODE_4_LINE);
-    
-    //dir_list("/sdcard");
 
     ESP_LOGI(TAG, "[ 1.2 ] Mount assets");
     esp_vfs_fat_sdmmc_mount_config_t mount_config = {
@@ -122,16 +121,14 @@ void app_main(void)
         .max_files = 3};
     esp_vfs_fat_spiflash_mount("/spiflash", NULL, &mount_config, &s_test_wl_handle);
 
-    //dir_list("/spiflash");
-
     ESP_LOGI(TAG, "[ 2 ] Start codec chip");
     audio_hal_ctrl_codec(audio_board_get_hal(), AUDIO_HAL_CODEC_MODE_DECODE, AUDIO_HAL_CTRL_START);
 
     ESP_LOGI(TAG, "[ 3 ] Start handlers");
 
     pb_init(set);
-    
-    //xTaskCreate(print_all_tasks, "print_all_tasks", 4096, NULL, 5, NULL);
+
+    // xTaskCreate(print_all_tasks, "print_all_tasks", 4096, NULL, 5, NULL);
 
     int volume = 30;
     audio_hal_set_volume(audio_board_get_hal(), volume);
@@ -150,7 +147,7 @@ void app_main(void)
     nfc_init();
     cloud_init();
     /* already too much memory consumption, do not enable by default */
-    //www_init();
+    // www_init();
     ota_init();
 
     while (1)

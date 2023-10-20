@@ -11,7 +11,6 @@
 uint8_t malloc_buffers[MALLOC_BUFFERS][30 * 1024];
 bool malloc_buffers_used[MALLOC_BUFFERS];
 
-static const char *TAG = "[MEM]";
 
 void *teddybox_custom_malloc(size_t size)
 {

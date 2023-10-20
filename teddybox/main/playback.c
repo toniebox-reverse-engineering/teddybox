@@ -20,7 +20,7 @@
 #include "playback.h"
 #include "board.h"
 #include "math.h"
-#include "led.h"
+#include "ledman.h"
 #include "cloud.h"
 
 audio_pipeline_handle_t pipeline;
@@ -139,6 +139,11 @@ esp_err_t pb_toniefile_open(pb_toniefile_t *info, const char *filepath)
 
 void pb_toniefile_close(pb_toniefile_t *info)
 {
+    if (!info->valid)
+    {
+        return;
+    }
+
     FILE *fd = info->fd;
     info->valid = false;
     info->fd = NULL;
@@ -150,6 +155,7 @@ void pb_toniefile_close(pb_toniefile_t *info)
     toniebox_audio_file_header__free_unpacked(info->taf, NULL);
     info->taf = NULL;
     free(info->filename);
+    info->filename = NULL;
 }
 
 static size_t pb_ensure_block(pb_toniefile_t *info, FILE *fd)
@@ -582,7 +588,7 @@ static esp_err_t pb_req_handle_play(pb_req_play_t *req)
     /* right now we cannot play this file, wait for token to download it */
     if (file_state != PB_ERR_GOOD_FILE)
     {
-        led_set_rgb(0, 0, 100);
+        ledman_change("checking");
         return ESP_FAIL;
     }
 
@@ -661,10 +667,9 @@ static esp_err_t pb_req_handle_play_token(pb_req_play_token_t *req)
     {
         ESP_LOGE(TAG, "...could not download the file");
         free(filename);
-        led_set_rgb(100, 0, 0);
+        ledman_change("failed");
         return ESP_ERR_NOT_FOUND;
     }
-    led_set_rgb(0, 0, 100);
 
     return pb_int_play_file(filename);
 }
@@ -786,7 +791,7 @@ void pb_mainthread(void *arg)
                         pb_playing = true;
                         if (!pb_default_content)
                         {
-                            led_set_rgb(0, 50, 50);
+                            ledman_change("idle");
                         }
                         break;
                     case AEL_STATUS_STATE_RUNNING:
@@ -794,7 +799,14 @@ void pb_mainthread(void *arg)
                         pb_playing = true;
                         if (!pb_default_content)
                         {
-                            led_set_rgb(0, 50, 100);
+                            if (current_dl_req)
+                            {
+                                ledman_change("playing download");
+                            }
+                            else
+                            {
+                                ledman_change("playing");
+                            }
                         }
                         break;
                     case AEL_STATUS_STATE_STOPPED:
@@ -804,7 +816,7 @@ void pb_mainthread(void *arg)
                         {
                             if (!pb_default_content)
                             {
-                                led_set_rgb(0, 100, 0);
+                                ledman_change("idle");
                             }
                             pb_playing = false;
                             audio_pipeline_reset_ringbuffer(pipeline);
