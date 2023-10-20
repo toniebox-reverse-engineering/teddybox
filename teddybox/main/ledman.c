@@ -39,8 +39,7 @@ const State states[] = {
     {.name = "fadeblink blue-red", .seq = (const SequenceCommand[]){FADE(0, 0, 100, 200, 10), FADE(100, 0, 0, 200, 10), LOOP()}},
 
     {.name = "fadeblink blue-red slow", .seq = (const SequenceCommand[]){FADE(0, 0, 100, 800, 10), FADE(100, 0, 0, 800, 10), LOOP()}},
-    {.name = "fadeblink blue-green slow", .seq = (const SequenceCommand[]){FADE(0, 0, 100, 800, 10), FADE(0, 100, 0, 800, 10), LOOP()}}
-
+    {.name = "fadeblink blue-green slow", .seq = (const SequenceCommand[]){FADE(0, 0, 100, 1000, 10), FADE(0, 100, 0, 1000, 10), LOOP()}}
 };
 
 typedef enum
@@ -216,7 +215,7 @@ void ledman_init()
     esp_log_level_set(TAG, ESP_LOG_INFO);
 
     ledman_queue = xQueueCreate(10, sizeof(char *));
-    xTaskCreate(ledman_task, "ledman_task", 4096, NULL, 5, NULL);
+    xTaskCreate(ledman_task, "ledman_task", 2048, NULL, 5, NULL);
 
     ledman_change("fade in");
 }

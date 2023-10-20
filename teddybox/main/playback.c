@@ -506,10 +506,15 @@ static esp_err_t pb_int_abort_dl()
     {
         ESP_LOGI(TAG, "There is a download for '%s'", curr->filename);
         curr->abort = true;
-        while (curr->state < CC_STATE_ABORTED)
+        while (curr->state < CC_STATE_FINISHED)
         {
             ESP_LOGI(TAG, "wait for abort...");
-            vTaskDelay(500 / portTICK_PERIOD_MS);
+            vTaskDelay(100 / portTICK_PERIOD_MS);
+        }
+        if (curr->handle)
+        {
+            fclose(curr->handle);
+            curr->handle = NULL;
         }
         cloud_content_cleanup(curr);
     }
@@ -528,10 +533,11 @@ static void pb_int_stop()
     audio_pipeline_wait_for_stop(pipeline);
     audio_pipeline_terminate(pipeline);
 
-    pb_toniefile_close(&pb_toniefile_info);
     pb_playing = false;
     pb_default_content = false;
 
+    /* close local file handles and free stuff */
+    pb_toniefile_close(&pb_toniefile_info);
     /* in case there is a download, also stop that one */
     pb_int_abort_dl();
 }
@@ -822,6 +828,11 @@ void pb_mainthread(void *arg)
                             audio_pipeline_reset_ringbuffer(pipeline);
                             audio_pipeline_reset_elements(pipeline);
                             audio_pipeline_change_state(pipeline, AEL_STATE_INIT);
+
+                            /* close handle and free stuff, if not done before */
+                            pb_toniefile_close(&pb_toniefile_info);
+                            /* stop any pending download and close file handles */
+                            pb_int_abort_dl();
                         }
                         break;
                     default:
@@ -858,7 +869,8 @@ void pb_init(esp_periph_set_handle_t set)
     ESP_LOGI(TAG, "Create opus decoder");
     opus_decoder_cfg_t opus_dec_cfg = DEFAULT_OPUS_DECODER_CONFIG();
     opus_dec_cfg.stack_in_ext = false;
-    opus_dec_cfg.task_prio = 100;
+    opus_dec_cfg.task_prio = 200;
+    opus_dec_cfg.out_rb_size = 4096;
     music_decoder = decoder_opus_init(&opus_dec_cfg);
 
     ESP_LOGI(TAG, "Register all elements to audio pipeline");

@@ -191,7 +191,7 @@ static esp_err_t cloud_request(cloud_req_t *req)
                        "\r\n",
              req->path, req->host, auth_line, range_line, running_app_info.version);
 
-    //ESP_LOGI(TAG, "Header %s...", request);
+    // ESP_LOGI(TAG, "Header %s...", request);
     esp_tls_cfg_t cfg = {
         .cacert_buf = ca_der,
         .cacert_bytes = ca_der_len,
@@ -509,10 +509,20 @@ esp_err_t cloud_content_end_cbr(void *ctx)
     cloud_content_req_t *req = (cloud_content_req_t *)ctx;
     ESP_LOGI(TAG, "[CDL] End transfer, %d/%d received", req->received, req->content_length);
 
+/* playback handler initiated the download, it shall close handles
     if (req->handle)
     {
         fclose(req->handle);
         req->handle = NULL;
+    }
+*/
+    if (req->state == CC_STATE_ABORTED)
+    {
+        req->state = CC_STATE_ERROR;
+    }
+    else
+    {
+        req->state = CC_STATE_FINISHED;
     }
     xSemaphoreGive(req->update_sem);
     return ESP_OK;
