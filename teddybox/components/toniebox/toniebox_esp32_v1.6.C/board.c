@@ -31,6 +31,10 @@
 #include "periph_adc_button.h"
 #include "esp_sleep.h"
 
+#include "driver/rtc_io.h"
+#include "soc/rtc.h"
+#include "esp_sleep.h"
+
 #include "dac3100.h"
 #include "driver/gpio.h"
 #include "lis3dh.h"
@@ -40,6 +44,7 @@
 static const char *TAG = "TB-ESP32";
 
 static audio_board_handle_t board_handle = 0;
+static esp_periph_handle_t sdcard_handle = 0;
 
 static esp_err_t i2c_init(audio_board_handle_t board)
 {
@@ -145,9 +150,7 @@ audio_board_handle_t audio_board_init(void)
 
     /* init peripherals */
     ESP_LOGI(TAG, "Initializing Peripherals");
-
-    gpio_set_level(POWER_GPIO, 1);
-    gpio_set_level(SD_POWER_GPIO, 0);
+    audio_board_power(true);
 
     gpio_set_level(DAC3100_RESET_GPIO, 0);
     vTaskDelay(10 / portTICK_RATE_MS);
@@ -180,7 +183,7 @@ audio_board_handle_t audio_board_init(void)
 
     /* not used yet */
     esp_sleep_enable_gpio_wakeup();
-    
+
     led_set_rgb(0, 100, 0);
 
     return board_handle;
@@ -194,6 +197,17 @@ audio_hal_handle_t audio_board_codec_init(void)
     return codec_hal;
 }
 
+esp_err_t audio_board_sdcard_unmount()
+{
+    if(esp_periph_stop(sdcard_handle) != ESP_OK)
+    {
+        ESP_LOGE(TAG, "Stopping SD failed");
+        return ESP_FAIL;
+    }
+    
+    return ESP_OK;
+}
+
 esp_err_t audio_board_sdcard_init(esp_periph_set_handle_t set, periph_sdcard_mode_t mode)
 {
     if (mode != SD_MODE_4_LINE)
@@ -205,7 +219,7 @@ esp_err_t audio_board_sdcard_init(esp_periph_set_handle_t set, periph_sdcard_mod
         .root = "/sdcard",
         .card_detect_pin = -1,
         .mode = mode};
-    esp_periph_handle_t sdcard_handle = periph_sdcard_init(&sdcard_cfg);
+    sdcard_handle = periph_sdcard_init(&sdcard_cfg);
     esp_err_t ret = esp_periph_start(set, sdcard_handle);
     int retry_time = 5;
     bool mount_flag = false;
@@ -262,4 +276,17 @@ bool audio_board_ear_big()
 bool audio_board_ear_small()
 {
     return gpio_get_level(EAR_SMALL_GPIO) == 0;
+}
+
+void audio_board_power(bool state)
+{
+    gpio_set_level(POWER_GPIO, state);
+    gpio_set_level(SD_POWER_GPIO, !state);
+}
+
+void audio_board_poweroff()
+{
+    audio_board_power(false);
+    esp_sleep_enable_ext0_wakeup(WAKEUP_GPIO, 0);
+    esp_deep_sleep_start();
 }

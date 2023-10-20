@@ -35,6 +35,8 @@
 #include "cloud.h"
 #include "ledman.h"
 
+#include "config.h"
+
 #include "esp_heap_trace.h"
 
 static const char *TAG = "[TB]";
@@ -150,6 +152,8 @@ void app_main(void)
     // www_init();
     ota_init();
 
+    time_t last_activity_time = time(NULL);
+
     while (1)
     {
         vTaskDelay(100 / portTICK_PERIOD_MS);
@@ -191,18 +195,29 @@ void app_main(void)
             }
             else
             {
-
                 ESP_LOGI(TAG, "Volume down (limit)");
                 dac3100_beep(3, 0x140);
             }
+        }
+
+        if (pb_is_playing() || ear_big || ear_small)
+        {
+            last_activity_time = time(NULL);
+        }
+
+        if (time(NULL) - last_activity_time > POWEROFF_TIMEOUT)
+        {
+            break;
         }
 
         ear_big_prev = ear_big;
         ear_small_prev = ear_small;
     }
 
-    /* Stop all periph before removing the listener */
-    esp_periph_set_stop_all(set);
-    /* Release all resources */
-    esp_periph_set_destroy(set);
+    audio_board_sdcard_unmount();
+
+    ESP_LOGI(TAG, "Poweroff");
+    audio_board_poweroff();
+    
+    ESP_LOGE(TAG, "back, quite unexpected...");
 }

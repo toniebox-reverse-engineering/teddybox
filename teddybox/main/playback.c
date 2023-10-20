@@ -492,6 +492,11 @@ esp_err_t pb_stop()
     return ESP_OK;
 }
 
+bool pb_is_playing()
+{
+    return pb_playing;
+}
+
 /********************************************************/
 /* helpers for main loop, only to be called from there  */
 /********************************************************/

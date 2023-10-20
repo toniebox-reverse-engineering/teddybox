@@ -141,6 +141,9 @@ esp_err_t audio_board_deinit(audio_board_handle_t audio_board);
 bool audio_board_ear_big(void);
 bool audio_board_ear_small(void);
 bool board_headset_irq(void);
+void audio_board_power(bool state);
+void audio_board_poweroff(void);
+esp_err_t audio_board_sdcard_unmount(void);
 
 #ifdef __cplusplus
 }

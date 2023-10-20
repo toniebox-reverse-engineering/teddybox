@@ -111,4 +111,5 @@ esp_err_t pb_play_default(uint32_t id);
 esp_err_t pb_play_content(uint64_t nfc_uid);
 esp_err_t pb_play_content_token(uint64_t nfc_uid, const uint8_t *token);
 esp_err_t pb_stop();
+bool pb_is_playing();
 char *pb_build_filename(uint64_t id);
