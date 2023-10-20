@@ -11,6 +11,8 @@
 #include "freertos/task.h"
 
 #include "soc/rtc_cntl_reg.h"
+#include "driver/rtc_io.h"
+#include "soc/rtc.h"
 
 #include "esp_log.h"
 #include "nvs_flash.h"
@@ -41,6 +43,17 @@
 
 static const char *TAG = "[TB]";
 static wl_handle_t s_test_wl_handle;
+
+typedef struct
+{
+    uint32_t rtc_magic;
+    uint32_t volume;
+    uint64_t nfc_uid;
+    uint32_t play_position;
+    uint32_t rtc_check;
+} rtc_mem_t;
+
+static RTC_DATA_ATTR rtc_mem_t rtc_storage;
 
 void dir_list(const char *path)
 {
@@ -93,6 +106,37 @@ void print_all_tasks(void *params)
     }
 }
 
+static uint32_t rotl32a(uint32_t x, uint32_t n)
+{
+    return (x << n) | (x >> (32 - n));
+}
+
+static uint32_t rtc_checksum_calc()
+{
+    uint8_t *buf = (uint8_t *)&rtc_storage;
+    uint32_t len = sizeof(rtc_storage) - sizeof(uint32_t);
+    uint32_t chk = 0x55AA5A5A;
+
+    for (int pos = 0; pos < len; pos++)
+    {
+        chk ^= buf[pos];
+        chk = rotl32a(chk, 3);
+        chk += buf[pos];
+        chk = rotl32a(chk, 7);
+    }
+    return chk;
+}
+
+static void rtc_checksum_update()
+{
+    rtc_storage.rtc_check = rtc_checksum_calc();
+}
+
+static bool rtc_checksum_valid()
+{
+    return rtc_storage.rtc_check == rtc_checksum_calc();
+}
+
 void app_main(void)
 {
     /* Initialize NVS — it is used to store PHY calibration data */
@@ -132,8 +176,22 @@ void app_main(void)
 
     // xTaskCreate(print_all_tasks, "print_all_tasks", 4096, NULL, 5, NULL);
 
-    int volume = 30;
-    audio_hal_set_volume(audio_board_get_hal(), volume);
+    if (rtc_storage.rtc_magic != 0xDEADC0DE || !rtc_checksum_valid())
+    {
+        ESP_LOGE(TAG, "RTC memory corrupted, reinit");
+        memset(&rtc_storage, 0x00, sizeof(rtc_storage));
+        rtc_storage.rtc_magic = 0xDEADC0DE;
+        rtc_storage.volume = 50;
+        rtc_storage.play_position = 0;
+        rtc_checksum_update();
+    }
+    else if(rtc_storage.nfc_uid)
+    {
+        ESP_LOGI(TAG, "Inform playback handler UID %16llX / %d", rtc_storage.nfc_uid, rtc_storage.play_position);
+        pb_set_last(rtc_storage.nfc_uid, rtc_storage.play_position);
+    }
+
+    audio_hal_set_volume(audio_board_get_hal(), rtc_storage.volume);
 
     ESP_LOGI(TAG, "[ 4 ] detect headset");
     dac3100_set_mute(true);
@@ -153,21 +211,24 @@ void app_main(void)
     ota_init();
 
     int64_t last_activity_time = esp_timer_get_time();
+    int64_t remute_time = 0;
 
     while (1)
     {
         vTaskDelay(100 / portTICK_PERIOD_MS);
+        int64_t cur_time = esp_timer_get_time();
 
         bool ear_big = audio_board_ear_big();
         bool ear_small = audio_board_ear_small();
 
         if (ear_big && !ear_big_prev)
         {
-            if (volume < 100)
+            dac3100_set_mute(false);
+            if (rtc_storage.volume < 100)
             {
                 ESP_LOGI(TAG, "Volume up");
-                volume += 10;
-                audio_hal_set_volume(audio_board_get_hal(), volume);
+                rtc_storage.volume += 10;
+                audio_hal_set_volume(audio_board_get_hal(), rtc_storage.volume);
                 dac3100_beep(0, 0x140);
             }
             else
@@ -175,15 +236,17 @@ void app_main(void)
                 ESP_LOGI(TAG, "Volume up (limit)");
                 dac3100_beep(1, 0x140);
             }
+            remute_time = cur_time + 800;
         }
 
         if (ear_small && !ear_small_prev)
         {
-            if (volume >= 10)
+            dac3100_set_mute(false);
+            if (rtc_storage.volume >= 10)
             {
                 ESP_LOGI(TAG, "Volume down");
-                volume -= 10;
-                audio_hal_set_volume(audio_board_get_hal(), volume);
+                rtc_storage.volume -= 10;
+                audio_hal_set_volume(audio_board_get_hal(), rtc_storage.volume);
                 dac3100_beep(2, 0x140);
             }
             else
@@ -191,14 +254,27 @@ void app_main(void)
                 ESP_LOGI(TAG, "Volume down (limit)");
                 dac3100_beep(3, 0x140);
             }
+            remute_time = cur_time + 800;
+        }
+
+        if (remute_time != 0 && cur_time > remute_time)
+        {
+            remute_time = 0;
+            dac3100_set_mute(!pb_is_playing());
         }
 
         if (pb_is_playing() || ear_big || ear_small)
         {
-            last_activity_time = esp_timer_get_time();
+            last_activity_time = cur_time;
         }
 
-        if ((esp_timer_get_time() - last_activity_time) > POWEROFF_TIMEOUT)
+        if (pb_is_playing())
+        {
+            rtc_storage.nfc_uid = pb_get_current_uid();
+            rtc_storage.play_position = pb_get_play_position();
+        }
+
+        if ((cur_time - last_activity_time) > POWEROFF_TIMEOUT)
         {
             break;
         }
@@ -209,6 +285,7 @@ void app_main(void)
 
     ledman_change("poweroff");
     audio_board_sdcard_unmount();
+    rtc_checksum_update();
 
     ESP_LOGI(TAG, "Poweroff");
     vTaskDelay(500 / portTICK_PERIOD_MS);

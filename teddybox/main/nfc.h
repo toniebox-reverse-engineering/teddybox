@@ -6,3 +6,4 @@
 #define NFC_RETRIES 5
 
 void nfc_init();
+uint64_t nfc_get_current_uid();

@@ -34,6 +34,9 @@ static bool pb_playing = false;
 static pb_toniefile_t pb_toniefile_info;
 static cloud_content_req_t *current_dl_req = NULL;
 
+static uint64_t pb_last_nfc_uid = 0;
+static uint32_t pb_last_play_position = 0;
+
 static const char *TAG = "[PB]";
 
 /* ********************************************************************************************************************* */
@@ -128,12 +131,13 @@ esp_err_t pb_toniefile_open(pb_toniefile_t *info, const char *filepath)
     }
 
     info->current_pos = TONIEFILE_FRAME_SIZE;
-    info->current_block = -1;
-    info->current_chapter = -1;
+    info->current_block = 0;
+    info->current_chapter = 0;
     info->target_chapter = -1;
     info->target_pos = -1;
     info->seek_blocks = 0;
     info->valid = true;
+    info->initialized = false;
 
     return ESP_OK;
 }
@@ -163,6 +167,34 @@ static size_t pb_ensure_block(pb_toniefile_t *info, FILE *fd)
 {
     bool read = false;
 
+    /* when starting with no block preselected, we can safely start playing at the first block */
+    if (info->current_block == 0)
+    {
+        info->initialized = true;
+    }
+
+    /* else, before we can play any position, read the initial ogg header block */
+    if (!info->initialized)
+    {
+        if (info->current_pos == TONIEFILE_FRAME_SIZE)
+        {
+            fseek(fd, TONIEFILE_FRAME_SIZE, SEEK_SET);
+            info->current_block_avail = fread(info->current_block_buffer, 1, 0x200, fd);
+        }
+
+        /* before we continue, first consume the initial Ogg block */
+        size_t remain = info->current_block_avail - (info->current_pos % TONIEFILE_FRAME_SIZE);
+        if (remain)
+        {
+            return remain;
+        }
+
+        /* consumed the 0x200 bytes "first-block", proceed to normal operation */
+        info->current_pos = info->current_block * TONIEFILE_FRAME_SIZE;
+        info->current_block = 0;
+        info->initialized = true;
+    }
+
     if (info->current_pos >= (info->current_block + 1) * TONIEFILE_FRAME_SIZE)
     {
         read = true;
@@ -181,6 +213,10 @@ static size_t pb_ensure_block(pb_toniefile_t *info, FILE *fd)
         {
             info->current_block_avail = 0;
         }
+    }
+    if (!pb_default_content)
+    {
+        pb_last_play_position = info->current_block;
     }
 
     size_t remain = info->current_block_avail - (info->current_pos % TONIEFILE_FRAME_SIZE);
@@ -498,6 +534,27 @@ bool pb_is_playing()
     return pb_playing;
 }
 
+uint32_t pb_get_play_position()
+{
+    if (!pb_is_playing())
+    {
+        return 0;
+    }
+
+    return pb_toniefile_info.current_block;
+}
+
+uint64_t pb_get_current_uid()
+{
+    return pb_last_nfc_uid;
+}
+
+void pb_set_last(uint64_t nfc_uid, uint32_t play_position)
+{
+    pb_last_nfc_uid = nfc_uid;
+    pb_last_play_position = play_position;
+}
+
 /********************************************************/
 /* helpers for main loop, only to be called from there  */
 /********************************************************/
@@ -548,7 +605,7 @@ static void pb_int_stop()
     pb_int_abort_dl();
 }
 
-static esp_err_t pb_int_play_file(const char *file)
+static esp_err_t pb_int_play_file(const char *file, uint64_t nfc_uid)
 {
     ESP_LOGI(TAG, "Play: '%s'", file);
 
@@ -556,6 +613,21 @@ static esp_err_t pb_int_play_file(const char *file)
     {
         ESP_LOGE(TAG, "Failed to play file: '%s'", file);
         return ESP_FAIL;
+    }
+
+    if (!pb_default_content)
+    {
+        if (nfc_uid == pb_last_nfc_uid)
+        {
+            ESP_LOGI(TAG, "UID %16llX match, set last play position to %d", nfc_uid, pb_last_play_position);
+            pb_toniefile_info.current_block = pb_last_play_position + 1;
+        }
+        else
+        {
+            ESP_LOGI(TAG, "UID %16llX is new, play from start", nfc_uid);
+            pb_last_play_position = 0;
+            pb_last_nfc_uid = nfc_uid;
+        }
     }
 
     audio_pipeline_run(pipeline);
@@ -572,7 +644,7 @@ static esp_err_t pb_int_play_default(uint32_t lang, uint32_t id)
     if (pb_check_file(filename) == PB_ERR_GOOD_FILE)
     {
         pb_default_content = true;
-        return pb_int_play_file(filename);
+        return pb_int_play_file(filename, 0);
     }
     lang = 0;
 
@@ -580,7 +652,7 @@ static esp_err_t pb_int_play_default(uint32_t lang, uint32_t id)
     if (pb_check_file(filename) == PB_ERR_GOOD_FILE)
     {
         pb_default_content = true;
-        return pb_int_play_file(filename);
+        return pb_int_play_file(filename, 0);
     }
     ESP_LOGE(TAG, "requested ID does not exist: '%08X', neither in lang %d nor in default", id, lang);
     return ESP_ERR_NOT_FOUND;
@@ -600,9 +672,13 @@ static esp_err_t pb_req_handle_play(pb_req_play_t *req)
     /* right now we cannot play this file, wait for token to download it */
     if (file_state != PB_ERR_GOOD_FILE)
     {
+        free(filename);
         ledman_change("checking");
         return ESP_FAIL;
     }
+
+    pb_int_play_file(filename, req->uid);
+    free(filename);
 
     return ESP_OK;
 }
@@ -621,7 +697,7 @@ static esp_err_t pb_req_handle_play_token(pb_req_play_token_t *req)
     /* quite unexpected. should not happen, but play anyway */
     if (file_state == PB_ERR_GOOD_FILE)
     {
-        pb_int_play_file(filename);
+        pb_int_play_file(filename, req->uid);
         free(filename);
         return ESP_OK;
     }
@@ -634,8 +710,15 @@ static esp_err_t pb_req_handle_play_token(pb_req_play_token_t *req)
     ESP_LOGI(TAG, "initiate download");
     current_dl_req = cloud_content_download(req->uid, req->token);
 
+    if (!pb_default_content && pb_last_nfc_uid != req->uid)
+    {
+        pb_last_play_position = 0;
+    }
+
     bool proceed = false;
     bool waiting = true;
+    uint32_t start_pos = (pb_default_content ? 0 : pb_last_play_position) + PB_MIN_DL_BLOCKS;
+
     while (waiting)
     {
         vTaskDelay(100 / portTICK_PERIOD_MS);
@@ -665,7 +748,7 @@ static esp_err_t pb_req_handle_play_token(pb_req_play_token_t *req)
             break;
 
         case CC_STATE_RECEIVING:
-            if (current_dl_req->received / 4096 > PB_MIN_DL_BLOCKS)
+            if (current_dl_req->received / 4096 > start_pos)
             {
                 ESP_LOGI(TAG, "Download in progress, enough blocks received");
                 waiting = false;
@@ -683,7 +766,7 @@ static esp_err_t pb_req_handle_play_token(pb_req_play_token_t *req)
         return ESP_ERR_NOT_FOUND;
     }
 
-    return pb_int_play_file(filename);
+    return pb_int_play_file(filename, req->uid);
 }
 
 static esp_err_t pb_req_handle_stop(pb_req_stop_t *req)
@@ -840,6 +923,7 @@ void pb_mainthread(void *arg)
                             {
                                 ledman_change("idle");
                             }
+                            pb_default_content = false;
                             pb_playing = false;
                             audio_pipeline_reset_ringbuffer(pipeline);
                             audio_pipeline_reset_elements(pipeline);

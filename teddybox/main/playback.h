@@ -94,6 +94,7 @@ typedef struct
     int32_t current_chapter;
     int32_t target_chapter;
     int32_t seek_blocks;
+    bool initialized;
     TonieboxAudioFileHeader *taf;
 } pb_toniefile_t;
 
@@ -113,3 +114,6 @@ esp_err_t pb_play_content_token(uint64_t nfc_uid, const uint8_t *token);
 esp_err_t pb_stop();
 bool pb_is_playing();
 char *pb_build_filename(uint64_t id);
+uint32_t pb_get_play_position();
+uint64_t pb_get_current_uid();
+void pb_set_last(uint64_t nfc_uid, uint32_t play_position);
