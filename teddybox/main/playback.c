@@ -957,7 +957,6 @@ void pb_init(esp_periph_set_handle_t set)
     pipeline = audio_pipeline_init(&pipeline_cfg);
     mem_assert(pipeline);
 
-    ESP_LOGI(TAG, "Create i2s stream to write data to codec chip");
     i2s_stream_cfg_t i2s_cfg = I2S_STREAM_CFG_DEFAULT();
     i2s_cfg.type = AUDIO_STREAM_WRITER;
     i2s_cfg.i2s_config.use_apll = false;
@@ -966,18 +965,15 @@ void pb_init(esp_periph_set_handle_t set)
 
     i2s_stream_writer = i2s_stream_init(&i2s_cfg);
 
-    ESP_LOGI(TAG, "Create opus decoder");
     opus_decoder_cfg_t opus_dec_cfg = DEFAULT_OPUS_DECODER_CONFIG();
     opus_dec_cfg.stack_in_ext = false;
     opus_dec_cfg.task_prio = 200;
     opus_dec_cfg.out_rb_size = 4096;
     music_decoder = decoder_opus_init(&opus_dec_cfg);
 
-    ESP_LOGI(TAG, "Register all elements to audio pipeline");
     audio_pipeline_register(pipeline, music_decoder, "dec");
     audio_pipeline_register(pipeline, i2s_stream_writer, "i2s");
 
-    ESP_LOGI(TAG, "Link it together [toniefile]-->music_decoder-->i2s_stream-->[codec_chip]");
     const char *link_tag[2] = {"dec", "i2s"};
     audio_pipeline_link(pipeline, &link_tag[0], 2);
     audio_element_set_read_cb(music_decoder, &pb_toniefile_cbr, &pb_toniefile_info);
@@ -986,10 +982,7 @@ void pb_init(esp_periph_set_handle_t set)
     audio_event_iface_cfg_t evt_cfg = AUDIO_EVENT_IFACE_DEFAULT_CFG();
     evt = audio_event_iface_init(&evt_cfg);
 
-    ESP_LOGI(TAG, "Listening event from all elements of pipeline");
     audio_pipeline_set_listener(pipeline, evt);
-
-    ESP_LOGI(TAG, "Listening event from peripherals");
     audio_event_iface_set_listener(esp_periph_set_get_event_iface(set), evt);
 
     xTaskCreatePinnedToCore(pb_mainthread, "[TB] Playback", 2500, NULL, PB_TASK_PRIO, NULL, tskNO_AFFINITY);
@@ -997,7 +990,7 @@ void pb_init(esp_periph_set_handle_t set)
 
 void pb_deinit()
 {
-    ESP_LOGI(TAG, "[ 7 ] Stop audio_pipeline");
+    ESP_LOGI(TAG, "Stop audio_pipeline");
 
     audio_pipeline_stop(pipeline);
     audio_pipeline_wait_for_stop(pipeline);

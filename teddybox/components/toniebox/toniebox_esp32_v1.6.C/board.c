@@ -146,7 +146,7 @@ audio_board_handle_t audio_board_init(void)
 
     /* set LED to default states */
     led_init();
-    led_set_rgb(20, 20, 20);
+    led_set_rgb(0, 0, 0);
 
     /* init peripherals */
     ESP_LOGI(TAG, "Initializing Peripherals");
@@ -181,10 +181,6 @@ audio_board_handle_t audio_board_init(void)
     gpio_set_intr_type(TRF7962A_IRQ_GPIO, GPIO_INTR_POSEDGE);
     gpio_intr_enable(TRF7962A_IRQ_GPIO);
 
-    /* not used yet */
-    esp_sleep_enable_gpio_wakeup();
-
-    led_set_rgb(0, 100, 0);
 
     return board_handle;
 }
