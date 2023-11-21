@@ -16,11 +16,18 @@ static const char *TAG = "LIS3DH";
 
 esp_err_t lis3dh_get_reg(lis3dh_t ctx, uint8_t reg, uint8_t *val)
 {
+#ifdef DEVBOARD
+    *val = 0;
+    return ESP_OK;
+#endif
     return i2c_bus_read_bytes(ctx->i2c_handle, LIS3DH_ADDR, &reg, 1, val, 1);
 }
 
 esp_err_t lis3dh_set_reg(lis3dh_t ctx, uint8_t reg, uint8_t val)
 {
+#ifdef DEVBOARD
+    return ESP_OK;
+#endif
     return i2c_bus_write_bytes(ctx->i2c_handle, LIS3DH_ADDR, &reg, 1, &val, 1);
 }
 

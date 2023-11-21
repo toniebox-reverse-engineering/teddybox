@@ -8,8 +8,8 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
 fi
 
 echo "[ENV] Setting ADF/IDF paths"
-export ADF_PATH=$PWD/esp-adf
-export IDF_PATH=$ADF_PATH/esp-idf
+export ADF_PATH=${PWD}/esp-adf
+export IDF_PATH=${PWD}/esp-idf
 
 echo "[ENV] Exporting IDF vars"
 . $IDF_PATH/export.sh

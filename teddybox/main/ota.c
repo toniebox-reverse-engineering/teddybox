@@ -5,9 +5,9 @@
 
 #include "esp_system.h"
 #include "esp_event.h"
-#define LOG_LOCAL_LEVEL ESP_LOG_WARN
 #include "esp_log.h"
 #include "esp_ota_ops.h"
+#include "esp_app_format.h"
 #include "esp_http_client.h"
 #include "esp_flash_partitions.h"
 #include "esp_partition.h"
@@ -176,8 +176,9 @@ void ota_init()
     running = esp_ota_get_running_partition();
     update_partition = esp_ota_get_next_update_partition(NULL);
 
-    ESP_LOGI(TAG, "  Configured 0x%08x '%s'", configured->address, configured->label);
-    ESP_LOGI(TAG, "  Current    0x%08x '%s'", running->address, running->label);
+    ESP_LOGI(TAG, "  Configured 0x%08lx '%s'", configured->address, configured->label);
+    ESP_LOGI(TAG, "  Current    0x%08lx '%s'", running->address, running->label);
+    ESP_LOGI(TAG, "  OTA        0x%08lx '%s'", update_partition->address, update_partition->label);
 
     if (esp_ota_get_partition_description(running, &running_app_info) != ESP_OK)
     {
@@ -185,8 +186,7 @@ void ota_init()
         return;
     }
 
-    ESP_LOGI(TAG, "  Running firmware version: %s", running_app_info.version);
-    ESP_LOGI(TAG, "  OTA partition subtype %d at offset 0x%x", update_partition->subtype, update_partition->address);
+    ESP_LOGI(TAG, "  Current version: %s", running_app_info.version);
 
-    xTaskCreatePinnedToCore(ota_mainthread, "[TB] OTA", 2048, NULL, 5, NULL, 0);
+    xTaskCreatePinnedToCore(ota_mainthread, "[TB] OTA", 4096, NULL, 5, NULL, 0);
 }

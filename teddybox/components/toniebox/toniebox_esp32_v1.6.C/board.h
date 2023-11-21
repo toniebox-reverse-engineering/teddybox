@@ -145,6 +145,10 @@ void audio_board_power(bool state);
 void audio_board_poweroff(void);
 esp_err_t audio_board_sdcard_unmount(void);
 
+float audio_board_get_vbatt(void);
+float audio_board_get_vcharger(void);
+
+
 #ifdef __cplusplus
 }
 #endif

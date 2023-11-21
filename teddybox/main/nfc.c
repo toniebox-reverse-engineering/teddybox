@@ -242,7 +242,7 @@ void nfc_mainthread(void *arg)
 
             for (int pass = 0; pass < COUNT(passes); pass++)
             {
-                ESP_LOGI(TAG, "Test pass 0x%08X", passes[pass]);
+                ESP_LOGI(TAG, "Test pass 0x%08lX", passes[pass]);
 
                 nfc_reset(trf);
 

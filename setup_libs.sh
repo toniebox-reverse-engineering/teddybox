@@ -3,11 +3,14 @@
 echo "[SETUP] Install ESP32-ADF"
 git clone --recursive https://github.com/espressif/esp-adf.git || exit 0
 
-cd esp-adf
-export ADF_PATH=$PWD
+echo "[SETUP] Install ESP32-IDF"
+git clone --recursive https://github.com/espressif/esp-idf.git || exit 0
 
-cd ${ADF_PATH}/esp-idf
-git apply ../../patches/malloc.diff
+export ADF_PATH=$PWD/esp-adf
+export IDF_PATH=$PWD/esp-idf
+
+cd ${IDF_PATH}
+git apply ../patches/malloc.diff
 ./install.sh
 
 . ./export.sh

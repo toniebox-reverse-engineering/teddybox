@@ -10,6 +10,9 @@ static const char *TAG = "LED";
 
 void led_init(void)
 {
+#ifdef DEVBOARD
+    return;
+#endif
     esp_log_level_set(TAG, ESP_LOG_INFO);
 
     mcpwm_gpio_init(MCPWM_UNIT_0, MCPWM0A, LED_RED_GPIO);
@@ -31,6 +34,9 @@ void led_init(void)
 
 void led_set(led_t led, float pct)
 {
+#ifdef DEVBOARD
+    return;
+#endif
     mcpwm_timer_t timer = MCPWM_TIMER_0;
 
     switch (led)

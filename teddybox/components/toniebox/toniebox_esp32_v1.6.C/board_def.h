@@ -83,9 +83,14 @@ extern audio_hal_func_t AUDIO_CODEC_DAC3100_DEFAULT_HANDLE;
 
 #define LED_BLUE_GPIO               GPIO_NUM_17
 #define LED_GREEN_GPIO              GPIO_NUM_18
+#ifdef DEVBOARD
+#define LED_RED_GPIO                GPIO_NUM_18
+#define EAR_BIG_GPIO                GPIO_NUM_21
+#else
 #define LED_RED_GPIO                GPIO_NUM_19
-
 #define EAR_BIG_GPIO                GPIO_NUM_20
+#endif
+
 #define EAR_SMALL_GPIO              GPIO_NUM_21
 
 #define DAC3100_RESET_GPIO          GPIO_NUM_26

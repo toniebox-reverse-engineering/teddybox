@@ -412,11 +412,11 @@ void trf7962a_dump_regs(trf7962a_t ctx)
     ESP_LOGI(TAG, "Done");
 }
 
-void trf7962a_isr(void *ctx_in)
+void IRAM_ATTR trf7962a_isr(void *ctx_in)
 {
-    trf7962a_t ctx = (trf7962a_t)ctx_in;
-    uint32_t value = 0;
-    xQueueSendFromISR(ctx->irq_received, &value, NULL);
+    //trf7962a_t ctx = (trf7962a_t)ctx_in;
+    //uint32_t value = 0;
+    //xQueueSendFromISR(ctx->irq_received, &value, NULL);
 }
 
 void trf7962a_field(trf7962a_t ctx, bool enabled)

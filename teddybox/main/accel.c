@@ -177,6 +177,13 @@ void accel_mainthread(void *arg)
     audio_board_handle_t board = (audio_board_handle_t)arg;
     float accel[3];
 
+    if(!board->lis3dh)
+    {
+        ESP_LOGI(TAG, "LIS3DH not available, exiting");
+        vTaskDelete(NULL);
+        return;
+    }
+
     board->lis3dh->set_data_rate(board->lis3dh, ACCEL_DATA_RATE);
     while (1)
     {

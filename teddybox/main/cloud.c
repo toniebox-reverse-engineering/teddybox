@@ -24,6 +24,7 @@
 #include "cloud.h"
 #include "wifi.h"
 #include "playback.h"
+#include "helpers.h"
 
 #define CLOUD_HOST "tc.fritz.box"
 
@@ -76,9 +77,9 @@ esp_err_t http_parser_received_cbr(void *ctx, uint8_t *data, size_t length)
             uint32_t status_code = 0;
             uint32_t content_length = 0;
 
-            if (sscanf((char *)parser_ctx->header_buffer, "HTTP/1.1 %d ", &status_code) == 1)
+            if (sscanf((char *)parser_ctx->header_buffer, "HTTP/1.1 %lu ", &status_code) == 1)
             {
-                ESP_LOGI(TAG, "Parsed HTTP Status Code: %d", status_code);
+                ESP_LOGI(TAG, "Parsed HTTP Status Code: %lu", status_code);
                 if (parser_ctx->http_status_cbr)
                 {
                     ret = parser_ctx->http_status_cbr(parser_ctx->ctx, status_code);
@@ -102,8 +103,8 @@ esp_err_t http_parser_received_cbr(void *ctx, uint8_t *data, size_t length)
             char *content_length_str = strstr((char *)parser_ctx->header_buffer, "Content-Length: ");
             if (content_length_str)
             {
-                sscanf(content_length_str, "Content-Length: %zu", &content_length);
-                ESP_LOGI(TAG, "Parsed Content-Length: %zu", content_length);
+                sscanf(content_length_str, "Content-Length: %lu", &content_length);
+                ESP_LOGI(TAG, "Parsed Content-Length: %lu", content_length);
             }
 
             parser_ctx->content_length = content_length;
@@ -167,23 +168,24 @@ static esp_err_t cloud_request(cloud_req_t *req)
 
     char *auth_line = strdup("");
     char *range_line = strdup("");
-    char *request;
-    char *url;
+    char *request = NULL;
+    char *url = NULL;
+
+    ESP_LOGI(TAG, "Connect to https://%s:%d%s", req->host, req->port, req->path);
+    url = custom_asprintf("https://%s:%d%s", req->host, req->port, req->path);
 
     if (req->auth)
     {
         free(auth_line);
-        asprintf(&auth_line, "Authorization: BD %s\r\n", req->auth);
+        auth_line = custom_asprintf("Authorization: BD %s\r\n", req->auth);
     }
     if (req->range_start)
     {
         free(range_line);
-        asprintf(&range_line, "Range: bytes=%d-\r\n", req->range_start);
+        range_line = custom_asprintf("Range: bytes=%lu-\r\n", req->range_start);
     }
-    asprintf(&url, "https://%s:%d%s", req->host, req->port, req->path);
-    ESP_LOGI(TAG, "Connect to %s...", url);
 
-    asprintf(&request, "GET %s HTTP/1.1\r\n"
+    request = custom_asprintf("GET %s HTTP/1.1\r\n"
                        "Host: %s\r\n"
                        "%s"
                        "%s"
@@ -191,7 +193,7 @@ static esp_err_t cloud_request(cloud_req_t *req)
                        "\r\n",
              req->path, req->host, auth_line, range_line, running_app_info.version);
 
-    // ESP_LOGI(TAG, "Header %s...", request);
+    // ESP_LOGI(TAG, "< '%s'", request);
     esp_tls_cfg_t cfg = {
         .cacert_buf = ca_der,
         .cacert_bytes = ca_der_len,
@@ -265,6 +267,7 @@ static esp_err_t cloud_request(cloud_req_t *req)
             continue;
         }
 
+        // ESP_LOGI(TAG, "< '%.*s'", len, receive_buffer);
         if (req->data_received_cbr)
         {
             esp_err_t cbr_ret = req->data_received_cbr(req->data_received_ctx, receive_buffer, len);
@@ -293,7 +296,7 @@ static esp_err_t cloud_request(cloud_req_t *req)
     }
 
 exit:
-    esp_tls_conn_delete(tls);
+    esp_tls_conn_destroy(tls);
 
     free(auth_line);
     free(request);
@@ -396,21 +399,21 @@ esp_err_t cloud_content_status_cbr(void *ctx, int status_code)
     switch (req->status_code)
     {
     case 200:
-        ESP_LOGI(TAG, "[CDL] HTTP %d received", req->status_code);
+        ESP_LOGI(TAG, "[CDL] HTTP %lu received", req->status_code);
 
         req->state = CC_STATE_CONNECTED;
         xSemaphoreGive(req->update_sem);
         return ESP_OK;
 
     case 206:
-        ESP_LOGI(TAG, "[CDL] HTTP %d received, partial content", req->status_code);
+        ESP_LOGI(TAG, "[CDL] HTTP %lu received, partial content", req->status_code);
 
         req->state = CC_STATE_CONNECTED;
         xSemaphoreGive(req->update_sem);
         return ESP_OK;
 
     default:
-        ESP_LOGE(TAG, "[CDL] Request failed for '%s': HTTP %d", req->location, req->status_code);
+        ESP_LOGE(TAG, "[CDL] Request failed for '%s': HTTP %lu", req->location, req->status_code);
 
         req->state = CC_STATE_ERROR;
         xSemaphoreGive(req->update_sem);
@@ -425,7 +428,7 @@ esp_err_t cloud_content_length_cbr(void *ctx, size_t content_range, size_t conte
     req->received = content_range;
     req->content_length = content_length;
 
-    ESP_LOGI(TAG, "[CDL] download %d-%d to '%s'", req->received, req->content_length, req->filename);
+    ESP_LOGI(TAG, "[CDL] download %lu-%lu to '%s'", req->received, req->content_length, req->filename);
 
     if (req->content_length == 0)
     {
@@ -499,7 +502,7 @@ esp_err_t cloud_content_cbr(void *ctx, uint8_t *data, size_t length)
         float percent_complete = (req->received * 100.0f / req->content_length);
         float eta = ((req->content_length - req->received) / (req->received / elapsed));
 
-        ESP_LOGI(TAG, "[CDL] %d bytes received (%2.2f%%), Speed: %2.2f KiB/s, ETA: %2.2f s", req->received, percent_complete, speed, eta);
+        ESP_LOGI(TAG, "[CDL] %lu bytes received (%2.2f%%), Speed: %2.2f KiB/s, ETA: %2.2f s", req->received, percent_complete, speed, eta);
     }
     return ESP_OK;
 }
@@ -507,7 +510,7 @@ esp_err_t cloud_content_cbr(void *ctx, uint8_t *data, size_t length)
 esp_err_t cloud_content_end_cbr(void *ctx)
 {
     cloud_content_req_t *req = (cloud_content_req_t *)ctx;
-    ESP_LOGI(TAG, "[CDL] End transfer, %d/%d received", req->received, req->content_length);
+    ESP_LOGI(TAG, "[CDL] End transfer, %lu/%lu received", req->received, req->content_length);
 
 /* playback handler initiated the download, it shall close handles
     if (req->handle)
@@ -587,7 +590,7 @@ cloud_content_req_t *cloud_content_download(uint64_t nfc_uid, const uint8_t *nfc
     if (stat(req->filename, &st) == 0)
     {
         req->received = st.st_size;
-        ESP_LOGI(TAG, "[CDL] Partial file, continue at %d", req->received);
+        ESP_LOGI(TAG, "[CDL] Partial file, continue at %lu", req->received);
     }
 
     xSemaphoreGive(req->file_sem);

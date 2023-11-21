@@ -7,6 +7,7 @@ message(STATUS "Current board name is " CONFIG_AUDIO_BOARD_CUSTOM)
 list(APPEND COMPONENT_ADD_INCLUDEDIRS ./toniebox_esp32_v1.6.C ./dac3100)
 set(COMPONENT_SRCS
 ./toniebox_esp32_v1.6.C/led.c
+./toniebox_esp32_v1.6.C/adc.c
 ./toniebox_esp32_v1.6.C/board.c
 ./toniebox_esp32_v1.6.C/board_pins_config.c
 ./dac3100/dac3100.c

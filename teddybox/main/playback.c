@@ -24,6 +24,9 @@
 #include "ledman.h"
 #include "cloud.h"
 
+#include "config.h"
+
+
 audio_pipeline_handle_t pipeline;
 audio_element_handle_t i2s_stream_writer, music_decoder;
 audio_event_iface_handle_t evt;
@@ -56,7 +59,7 @@ TonieboxAudioFileHeader *pb_toniefile_get_header(FILE *fd)
     uint32_t proto_size = (proto_be[0] << 24) | (proto_be[1] << 16) | (proto_be[2] << 8) | proto_be[3];
     if (proto_size > TONIEFILE_FRAME_SIZE)
     {
-        ESP_LOGE(TAG, "Invalid header size: 0x%04X", proto_size);
+        ESP_LOGE(TAG, "Invalid header size: 0x%04lX", proto_size);
         return NULL;
     }
     uint8_t *buffer = malloc(proto_size);
@@ -106,6 +109,7 @@ esp_err_t pb_toniefile_open(pb_toniefile_t *info, const char *filepath)
     else
     {
         ESP_LOGI(TAG, "Open Toniefile: %s", info->filename);
+#ifndef DEVBOARD
         info->fd = fopen(info->filename, "rb");
         if (!info->fd)
         {
@@ -120,14 +124,26 @@ esp_err_t pb_toniefile_open(pb_toniefile_t *info, const char *filepath)
             free(info->filename);
             return ESP_FAIL;
         }
+#else
+        extern const unsigned char dummy_audio_start[] asm("_binary_00000000_start");
+        extern const unsigned char dummy_audio_end[] asm("_binary_00000000_end");
+        const size_t dummy_audio_size = (dummy_audio_end - dummy_audio_start);
+
+        info->taf = malloc(sizeof(TonieboxAudioFileHeader));
+        info->taf->audio_id = 0xDEADBEEF;
+        info->taf->num_bytes = dummy_audio_size;
+        info->taf->n_track_page_nums = 1;
+        info->taf->track_page_nums = malloc(sizeof(uint32_t));
+        info->taf->track_page_nums[0] = 0;
+#endif
     }
 
-    ESP_LOGI(TAG, "  Audio ID: %08X", info->taf->audio_id);
+    ESP_LOGI(TAG, "  Audio ID: %08lX", info->taf->audio_id);
     ESP_LOGI(TAG, "  Size:     %08llX", info->taf->num_bytes);
     ESP_LOGI(TAG, "  Chapters: %d", info->taf->n_track_page_nums);
     for (int chap = 0; chap < info->taf->n_track_page_nums; chap++)
     {
-        ESP_LOGI(TAG, "    %d: offset %08X", chap, info->taf->track_page_nums[chap]);
+        ESP_LOGI(TAG, "    %d: offset %08lX", chap, info->taf->track_page_nums[chap]);
     }
 
     info->current_pos = TONIEFILE_FRAME_SIZE;
@@ -153,11 +169,14 @@ void pb_toniefile_close(pb_toniefile_t *info)
     info->valid = false;
     info->fd = NULL;
     /* ToDo: all of that remote/local playback thing has to be coordinated. for now just leave handles open */
-    if (!current_dl_req)
+    if (!current_dl_req && fd)
     {
         fclose(fd);
     }
-    toniebox_audio_file_header__free_unpacked(info->taf, NULL);
+    if(info->taf)
+    {
+        toniebox_audio_file_header__free_unpacked(info->taf, NULL);
+    }
     info->taf = NULL;
     free(info->filename);
     info->filename = NULL;
@@ -165,6 +184,12 @@ void pb_toniefile_close(pb_toniefile_t *info)
 
 static size_t pb_ensure_block(pb_toniefile_t *info, FILE *fd)
 {
+#ifdef DEVBOARD
+    extern const unsigned char dummy_audio_start[] asm("_binary_00000000_start");
+    extern const unsigned char dummy_audio_end[] asm("_binary_00000000_end");
+    const size_t dummy_audio_size = (dummy_audio_end - dummy_audio_start);
+#endif
+
     bool read = false;
 
     /* when starting with no block preselected, we can safely start playing at the first block */
@@ -173,13 +198,19 @@ static size_t pb_ensure_block(pb_toniefile_t *info, FILE *fd)
         info->initialized = true;
     }
 
+        ESP_LOGI(TAG, "ensure_block pos: %ld", info->current_pos);
     /* else, before we can play any position, read the initial ogg header block */
     if (!info->initialized)
     {
         if (info->current_pos == TONIEFILE_FRAME_SIZE)
         {
+#ifndef DEVBOARD
             fseek(fd, TONIEFILE_FRAME_SIZE, SEEK_SET);
             info->current_block_avail = fread(info->current_block_buffer, 1, 0x200, fd);
+#else
+            memcpy(info->current_block_buffer, &dummy_audio_start[TONIEFILE_FRAME_SIZE], 0x200);
+            info->current_block_avail = 0x200;
+#endif
         }
 
         /* before we continue, first consume the initial Ogg block */
@@ -207,12 +238,24 @@ static size_t pb_ensure_block(pb_toniefile_t *info, FILE *fd)
     if (read)
     {
         info->current_block = info->current_pos / TONIEFILE_FRAME_SIZE;
+        
+#ifndef DEVBOARD
         fseek(fd, info->current_block * TONIEFILE_FRAME_SIZE, SEEK_SET);
         info->current_block_avail = fread(info->current_block_buffer, 1, TONIEFILE_FRAME_SIZE, fd);
         if (info->current_block_avail < 0)
         {
             info->current_block_avail = 0;
         }
+#else
+        uint32_t pos = info->current_block * TONIEFILE_FRAME_SIZE;
+        info->current_block_avail = TONIEFILE_FRAME_SIZE;
+        if(pos + info->current_block_avail > dummy_audio_size)
+        {
+            info->current_block_avail = dummy_audio_size - pos;
+        }
+
+        memcpy(info->current_block_buffer, &dummy_audio_start[pos], info->current_block_avail);
+#endif
     }
     if (!pb_default_content)
     {
@@ -234,16 +277,24 @@ int pb_toniefile_cbr(audio_element_handle_t self, char *buffer, int len, TickTyp
         return AEL_IO_DONE;
     }
 
+    if(xPortInIsrContext())
+    {
+        ESP_LOGE(TAG, "Called from interrupt");
+        return AEL_IO_DONE;
+    }
+        ESP_LOGI(TAG, "opus_cbr len: %d", len);
+
+
     /* doing seeking here, saves us some semaphores*/
     if (info->target_chapter >= 0)
     {
-        ESP_LOGI(TAG, "Set target chapter %d", info->target_chapter);
+        ESP_LOGI(TAG, "Set target chapter %ld", info->target_chapter);
         if (info->target_chapter < info->taf->n_track_page_nums)
         {
             uint32_t block = 1 + info->taf->track_page_nums[info->target_chapter];
             uint32_t offset = block * TONIEFILE_FRAME_SIZE;
 
-            ESP_LOGI(TAG, " -> block %d, offset %d", block, offset);
+            ESP_LOGI(TAG, " -> block %ld, offset %ld", block, offset);
             info->target_pos = offset;
         }
         info->target_chapter = -1;
@@ -261,7 +312,7 @@ int pb_toniefile_cbr(audio_element_handle_t self, char *buffer, int len, TickTyp
         {
             info->target_pos = info->current_pos + skip_bytes;
         }
-        ESP_LOGI(TAG, "Seek %d blocks, current offset 0x%08X, target 0x%08X", info->seek_blocks, info->current_pos, info->target_pos);
+        ESP_LOGI(TAG, "Seek %ld blocks, current offset 0x%08lX, target 0x%08lX", info->seek_blocks, info->current_pos, info->target_pos);
         info->seek_blocks = 0;
     }
 
@@ -305,7 +356,7 @@ int pb_toniefile_cbr(audio_element_handle_t self, char *buffer, int len, TickTyp
                 if (info->current_chapter != chap - 1)
                 {
                     info->current_chapter = chap - 1;
-                    ESP_LOGI(TAG, "Current chapter: %d", info->current_chapter);
+                    ESP_LOGI(TAG, "Current chapter: %ld", info->current_chapter);
                 }
                 break;
             }
@@ -443,6 +494,11 @@ esp_err_t pb_check_file(const char *filename)
     ESP_LOGI(TAG, "Check file '%s'", filename);
 
     /* no file at all, we have to download it */
+#ifdef DEVBOARD
+    ESP_LOGI(TAG, "devboard mode, fake response 'good'");
+    return PB_ERR_GOOD_FILE;
+#endif
+
     struct stat st;
     if (stat(filename, &st) != 0)
     {
@@ -619,7 +675,7 @@ static esp_err_t pb_int_play_file(const char *file, uint64_t nfc_uid)
     {
         if (nfc_uid == pb_last_nfc_uid)
         {
-            ESP_LOGI(TAG, "UID %16llX match, set last play position to %d", nfc_uid, pb_last_play_position);
+            ESP_LOGI(TAG, "UID %16llX match, set last play position to %lu", nfc_uid, pb_last_play_position);
             pb_toniefile_info.current_block = pb_last_play_position + 1;
         }
         else
@@ -640,7 +696,7 @@ static esp_err_t pb_int_play_default(uint32_t lang, uint32_t id)
 {
     char filename[64];
 
-    sprintf(filename, "/sdcard/CONTENT/%08X/%08X", lang, id);
+    sprintf(filename, "/sdcard/CONTENT/%08lX/%08lX", lang, id);
     if (pb_check_file(filename) == PB_ERR_GOOD_FILE)
     {
         pb_default_content = true;
@@ -648,13 +704,13 @@ static esp_err_t pb_int_play_default(uint32_t lang, uint32_t id)
     }
     lang = 0;
 
-    sprintf(filename, "/sdcard/CONTENT/%08X/%08X", lang, id);
+    sprintf(filename, "/sdcard/CONTENT/%08lX/%08lX", lang, id);
     if (pb_check_file(filename) == PB_ERR_GOOD_FILE)
     {
         pb_default_content = true;
         return pb_int_play_file(filename, 0);
     }
-    ESP_LOGE(TAG, "requested ID does not exist: '%08X', neither in lang %d nor in default", id, lang);
+    ESP_LOGE(TAG, "requested ID does not exist: '%08lX', neither in lang %lu nor in default", id, lang);
     return ESP_ERR_NOT_FOUND;
 }
 
@@ -960,15 +1016,16 @@ void pb_init(esp_periph_set_handle_t set)
     i2s_stream_cfg_t i2s_cfg = I2S_STREAM_CFG_DEFAULT();
     i2s_cfg.type = AUDIO_STREAM_WRITER;
     i2s_cfg.i2s_config.use_apll = false;
-    i2s_cfg.i2s_config.dma_buf_count = 4;
-    i2s_cfg.i2s_config.dma_buf_len = 512;
+    //i2s_cfg.i2s_config.dma_buf_count = 4;
+    //i2s_cfg.i2s_config.dma_buf_len = 512;
 
     i2s_stream_writer = i2s_stream_init(&i2s_cfg);
 
     opus_decoder_cfg_t opus_dec_cfg = DEFAULT_OPUS_DECODER_CONFIG();
     opus_dec_cfg.stack_in_ext = false;
-    opus_dec_cfg.task_prio = 200;
-    opus_dec_cfg.out_rb_size = 4096;
+    opus_dec_cfg.task_prio = 20;
+    opus_dec_cfg.task_core = 1;
+    //opus_dec_cfg.out_rb_size = 5096;
     music_decoder = decoder_opus_init(&opus_dec_cfg);
 
     audio_pipeline_register(pipeline, music_decoder, "dec");
@@ -985,7 +1042,7 @@ void pb_init(esp_periph_set_handle_t set)
     audio_pipeline_set_listener(pipeline, evt);
     audio_event_iface_set_listener(esp_periph_set_get_event_iface(set), evt);
 
-    xTaskCreatePinnedToCore(pb_mainthread, "[TB] Playback", 2500, NULL, PB_TASK_PRIO, NULL, tskNO_AFFINITY);
+    xTaskCreatePinnedToCore(pb_mainthread, "[TB] Playback", 3500, NULL, PB_TASK_PRIO, NULL, tskNO_AFFINITY);
 }
 
 void pb_deinit()

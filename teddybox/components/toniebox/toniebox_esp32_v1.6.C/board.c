@@ -40,6 +40,7 @@
 #include "lis3dh.h"
 #include "trf7962a.h"
 #include "led.h"
+#include "adc.h"
 
 static const char *TAG = "TB-ESP32";
 
@@ -53,7 +54,8 @@ static esp_err_t i2c_init(audio_board_handle_t board)
         .sda_pullup_en = GPIO_PULLUP_ENABLE,
         .scl_pullup_en = GPIO_PULLUP_ENABLE,
         .master.clk_speed = 400000};
-    int res = get_i2c_pins(I2C_NUM_0, &i2c_cfg);
+
+    get_i2c_pins(I2C_NUM_0, &i2c_cfg);
     board->i2c_handle = i2c_bus_create(I2C_NUM_0, &i2c_cfg);
 
     if (!board->i2c_handle)
@@ -64,18 +66,18 @@ static esp_err_t i2c_init(audio_board_handle_t board)
 
     uint8_t reg_add = 0;
     uint8_t reg_data = 0;
-    esp_err_t ret;
+    esp_err_t ret = ESP_OK;
 
     ESP_LOGE(TAG, "I2C checks:");
     reg_add = 0x0F;
-    ret = i2c_bus_read_bytes(board->i2c_handle, 0x32, &reg_add, 1, &reg_data, 1);
+    ret |= i2c_bus_read_bytes(board->i2c_handle, 0x32, &reg_add, 1, &reg_data, 1);
     ESP_LOGE(TAG, "  LIS3DH:  %s", ((ret == ESP_OK) && (reg_data == 0x33)) ? "[OK]" : "[FAIL]");
 
     reg_add = 0x00;
-    ret = i2c_bus_read_bytes(board->i2c_handle, DAC3100_ADDR, &reg_add, 1, &reg_data, 1);
+    ret |= i2c_bus_read_bytes(board->i2c_handle, DAC3100_ADDR, &reg_add, 1, &reg_data, 1);
     ESP_LOGE(TAG, "  DAC3100: %s", (ret == ESP_OK) ? "[OK]" : "[FAIL]");
 
-    return res;
+    return ret;
 }
 
 static esp_err_t spi_init(audio_board_handle_t board)
@@ -96,10 +98,10 @@ static esp_err_t spi_init(audio_board_handle_t board)
 
 static QueueHandle_t gpio_evt_queue = NULL;
 
-void headset_isr(void *ctx)
+void IRAM_ATTR headset_isr(void *ctx)
 {
-    uint32_t value = 0;
-    xQueueSendFromISR(gpio_evt_queue, &value, NULL);
+    //uint32_t value = 0;
+    //xQueueSendFromISR(gpio_evt_queue, &value, NULL);
 }
 
 bool board_headset_irq()
@@ -164,13 +166,14 @@ audio_board_handle_t audio_board_init(void)
     board_handle->trf7962a = trf7962a_init(board_handle->spi_dev, SPI_SS_GPIO);
 
     ESP_LOGI(TAG, " Initializing I²C");
-    i2c_init(board_handle);
+    if(i2c_init(board_handle) == ESP_OK)
+    {
+        ESP_LOGI(TAG, "  - LS3DH");
+        board_handle->lis3dh = lis3dh_init(board_handle->i2c_handle);
 
-    ESP_LOGI(TAG, "  - LS3DH");
-    board_handle->lis3dh = lis3dh_init(board_handle->i2c_handle);
-
-    ESP_LOGI(TAG, "  - DAC3100");
-    board_handle->audio_hal = audio_board_codec_init();
+        ESP_LOGI(TAG, "  - DAC3100");
+        board_handle->audio_hal = audio_board_codec_init();
+    }
 
     /* setup ISRs for INT lines */
     gpio_isr_handler_add(HEADPHONE_DETECT, headset_isr, NULL);
@@ -181,6 +184,7 @@ audio_board_handle_t audio_board_init(void)
     gpio_set_intr_type(TRF7962A_IRQ_GPIO, GPIO_INTR_POSEDGE);
     gpio_intr_enable(TRF7962A_IRQ_GPIO);
 
+    //adc_init();
 
     return board_handle;
 }
@@ -195,12 +199,12 @@ audio_hal_handle_t audio_board_codec_init(void)
 
 esp_err_t audio_board_sdcard_unmount()
 {
-    if(esp_periph_stop(sdcard_handle) != ESP_OK)
+    if (esp_periph_stop(sdcard_handle) != ESP_OK)
     {
         ESP_LOGE(TAG, "Stopping SD failed");
         return ESP_FAIL;
     }
-    
+
     return ESP_OK;
 }
 
@@ -286,4 +290,14 @@ void audio_board_poweroff()
     audio_board_power(false);
     esp_sleep_enable_ext0_wakeup(WAKEUP_GPIO, 0);
     esp_deep_sleep_start();
+}
+
+float audio_board_get_vbatt()
+{
+    return adc_get(1);
+}
+
+float audio_board_get_vcharger()
+{
+    return adc_get(0);
 }

@@ -139,7 +139,7 @@ static bool rtc_checksum_valid()
 
 void app_main(void)
 {
-        /* Initialize NVS — it is used to store PHY calibration data */
+    /* Initialize NVS — it is used to store PHY calibration data */
     esp_err_t ret = nvs_flash_init();
     if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND)
     {
@@ -159,7 +159,9 @@ void app_main(void)
     ledman_init();
 
     ESP_LOGI(TAG, "Mount sdcard");
+#ifndef DEVBOARD
     audio_board_sdcard_init(set, SD_MODE_4_LINE);
+#endif
 
     ESP_LOGI(TAG, "Mount assets");
     esp_vfs_fat_sdmmc_mount_config_t mount_config = {
@@ -168,13 +170,16 @@ void app_main(void)
     esp_vfs_fat_spiflash_mount("/spiflash", NULL, &mount_config, &s_test_wl_handle);
 
     ESP_LOGI(TAG, "Start codec chip");
+#ifndef DEVBOARD
     audio_hal_ctrl_codec(audio_board_get_hal(), AUDIO_HAL_CODEC_MODE_DECODE, AUDIO_HAL_CTRL_START);
+#endif
 
     ESP_LOGI(TAG, "Start handlers");
 
+    ESP_LOGI(TAG, " - Start playback");
     pb_init(set);
 
-    // xTaskCreate(print_all_tasks, "print_all_tasks", 4096, NULL, 5, NULL);
+    xTaskCreate(print_all_tasks, "print_all_tasks", 4096, NULL, 5, NULL);
 
     if (rtc_storage.rtc_magic != 0xDEADC0DE || !rtc_checksum_valid())
     {
@@ -187,7 +192,7 @@ void app_main(void)
     }
     else if (rtc_storage.nfc_uid)
     {
-        ESP_LOGI(TAG, "Inform playback handler UID %16llX / %d", rtc_storage.nfc_uid, rtc_storage.play_position);
+        ESP_LOGI(TAG, "Inform playback handler UID %16llX / %lu", rtc_storage.nfc_uid, rtc_storage.play_position);
         pb_set_last(rtc_storage.nfc_uid, rtc_storage.play_position);
     }
 
@@ -195,26 +200,41 @@ void app_main(void)
 
     dac3100_set_mute(true);
 
-    pb_play_default(CONTENT_DEFAULT_STARTUP);
-
     bool ear_big_prev = false;
     bool ear_small_prev = false;
 
+    ESP_LOGI(TAG, " - Start Accel");
     accel_init(board_handle);
+    ESP_LOGI(TAG, " - Start WiFi");
     wifi_init();
+    ESP_LOGI(TAG, " - Start NFC");
     nfc_init();
+    ESP_LOGI(TAG, " - Start Cloud");
     cloud_init();
-    /* already too much memory consumption, do not enable by default */
-    // www_init();
+    ESP_LOGI(TAG, " - Start OTA");
     ota_init();
+    ESP_LOGI(TAG, " - Start WWW");
+    www_init();
+
+    // ESP_LOGI(TAG, "Unmount assets again");
+    // esp_vfs_fat_spiflash_unmount("/spiflash", s_test_wl_handle);
+
+    ESP_LOGI(TAG, " - Play startup tone");
+    pb_play_default(CONTENT_DEFAULT_STARTUP);
 
     int64_t last_activity_time = esp_timer_get_time();
+    int64_t last_adc_time = esp_timer_get_time();
     int64_t remute_time = 0;
-    
+
     while (1)
     {
-        vTaskDelay(100 / portTICK_PERIOD_MS);
+        vTaskDelay(100000 / portTICK_PERIOD_MS);
         int64_t cur_time = esp_timer_get_time();
+
+        if (cur_time - last_adc_time > 500000)
+        {
+            // ESP_LOGI(TAG, "Vbatt: %f", audio_board_get_vbatt());
+        }
 
         bool ear_big = audio_board_ear_big();
         bool ear_small = audio_board_ear_small();

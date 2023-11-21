@@ -32,8 +32,6 @@
 #include "dac3100.h"
 
 static const char *TAG = "DAC3100";
-
-static bool codec_init_flag;
 static i2c_bus_handle_t i2c_handle;
 static uint8_t reg_cache[14][256];
 static uint8_t reg_page = 0;
@@ -85,24 +83,6 @@ audio_hal_func_t AUDIO_CODEC_DAC3100_DEFAULT_HANDLE = {
     .audio_codec_get_volume = dac3100_get_volume,
 };
 
-static int i2c_init()
-{
-    int res;
-    i2c_config_t dac3100_i2c_cfg = {
-        .mode = I2C_MODE_MASTER,
-        .sda_pullup_en = GPIO_PULLUP_ENABLE,
-        .scl_pullup_en = GPIO_PULLUP_ENABLE,
-        .master.clk_speed = 400000};
-    res = get_i2c_pins(I2C_NUM_0, &dac3100_i2c_cfg);
-    i2c_handle = i2c_bus_create(I2C_NUM_0, &dac3100_i2c_cfg);
-
-    if (!i2c_handle)
-    {
-        ESP_LOGE(TAG, "I2C init failed");
-    }
-    return res;
-}
-
 static esp_err_t dac3100_write_reg(uint8_t reg_add, uint8_t data)
 {
     if (reg_add == 0)
@@ -113,11 +93,18 @@ static esp_err_t dac3100_write_reg(uint8_t reg_add, uint8_t data)
     {
         reg_cache[reg_page][reg_add] = data;
     }
+#ifdef DEVBOARD
+    return ESP_OK;
+#endif
     return i2c_bus_write_bytes(i2c_handle, DAC3100_ADDR, &reg_add, sizeof(reg_add), &data, sizeof(data));
 }
 
 static esp_err_t dac3100_read_reg(uint8_t reg_add, uint8_t *p_data)
 {
+#ifdef DEVBOARD
+    *p_data = 0;
+    return ESP_OK;
+#endif
     esp_err_t err = i2c_bus_read_bytes(i2c_handle, DAC3100_ADDR, &reg_add, sizeof(reg_add), p_data, 1);
 
     if (err == ESP_OK)
@@ -126,11 +113,6 @@ static esp_err_t dac3100_read_reg(uint8_t reg_add, uint8_t *p_data)
     }
 
     return err;
-}
-
-bool dac3100_initialized()
-{
-    return codec_init_flag;
 }
 
 void dac3100_read_all()
@@ -194,7 +176,7 @@ esp_err_t dac3100_init(audio_hal_codec_config_t *cfg)
 {
     ESP_LOGI(TAG, "dac3100 init");
 
-    i2c_init();
+    i2c_handle = audio_board_get_handle()->i2c_handle;
 
     /* from datasheet */
 
