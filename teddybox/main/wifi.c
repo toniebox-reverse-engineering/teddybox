@@ -173,7 +173,7 @@ void wifi_load_nvs(void)
     do
     {
         nvs_handle_t nvs_handle;
-        esp_err_t err = nvs_open("TB_WIFI", NVS_READWRITE, &nvs_handle);
+        esp_err_t err = nvs_open("TB_WIFI", NVS_READONLY, &nvs_handle);
         if (err != ESP_OK)
         {
             ESP_LOGE(TAG, "Error (%s) opening NVS handle", esp_err_to_name(err));
@@ -264,7 +264,7 @@ void wifi_init(void)
 {
     esp_log_level_set(TAG, ESP_LOG_INFO);
 
-    wifi_load_nvs();
+    //wifi_load_nvs();
 
     ESP_ERROR_CHECK(esp_netif_init());
     ESP_ERROR_CHECK(esp_event_loop_create_default());
