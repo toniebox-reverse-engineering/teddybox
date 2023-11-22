@@ -10,6 +10,7 @@
 #include "esp_attr.h"
 #include "driver/spi_master.h"
 #include "driver/gpio.h"
+#include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/queue.h"

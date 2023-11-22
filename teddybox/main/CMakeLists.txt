@@ -1,8 +1,6 @@
 
 option(DEVBOARD "Compile for devboard" OFF)
 
-
-
 set(COMPONENT_SRCS "main.c" "helpers.c" "ledman.c" "cloud.c" "malloc.c" "nfc.c" "ota.c" "playback.c" "wifi.c" "webserver.c" "accel.c" "proto/protobuf-c.c" "proto/proto/toniebox.pb.taf-header.pb-c.c")
 set(COMPONENT_ADD_INCLUDEDIRS . "proto" "proto/proto")
 

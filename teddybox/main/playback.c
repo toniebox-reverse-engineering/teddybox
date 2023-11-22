@@ -81,6 +81,13 @@ TonieboxAudioFileHeader *pb_toniefile_get_header(FILE *fd)
     return taf;
 }
 
+
+#ifdef DEVBOARD
+extern const unsigned char dummy_audio[] asm("_binary_00000000_start");
+extern const uint32_t dummy_audio_size asm("_00000000_length");
+#endif
+
+
 esp_err_t pb_toniefile_open(pb_toniefile_t *info, const char *filepath)
 {
     memset(info, 0x00, sizeof(pb_toniefile_t));
@@ -125,10 +132,6 @@ esp_err_t pb_toniefile_open(pb_toniefile_t *info, const char *filepath)
             return ESP_FAIL;
         }
 #else
-        extern const unsigned char dummy_audio_start[] asm("_binary_00000000_start");
-        extern const unsigned char dummy_audio_end[] asm("_binary_00000000_end");
-        const size_t dummy_audio_size = (dummy_audio_end - dummy_audio_start);
-
         info->taf = malloc(sizeof(TonieboxAudioFileHeader));
         info->taf->audio_id = 0xDEADBEEF;
         info->taf->num_bytes = dummy_audio_size;
@@ -175,7 +178,12 @@ void pb_toniefile_close(pb_toniefile_t *info)
     }
     if(info->taf)
     {
+#ifndef DEVBOARD
         toniebox_audio_file_header__free_unpacked(info->taf, NULL);
+#else
+        free(info->taf->track_page_nums);
+        free(info->taf);
+#endif
     }
     info->taf = NULL;
     free(info->filename);
@@ -184,12 +192,6 @@ void pb_toniefile_close(pb_toniefile_t *info)
 
 static size_t pb_ensure_block(pb_toniefile_t *info, FILE *fd)
 {
-#ifdef DEVBOARD
-    extern const unsigned char dummy_audio_start[] asm("_binary_00000000_start");
-    extern const unsigned char dummy_audio_end[] asm("_binary_00000000_end");
-    const size_t dummy_audio_size = (dummy_audio_end - dummy_audio_start);
-#endif
-
     bool read = false;
 
     /* when starting with no block preselected, we can safely start playing at the first block */
@@ -198,7 +200,7 @@ static size_t pb_ensure_block(pb_toniefile_t *info, FILE *fd)
         info->initialized = true;
     }
 
-        ESP_LOGI(TAG, "ensure_block pos: %ld", info->current_pos);
+        //ESP_LOGI(TAG, "ensure_block pos: %ld", info->current_pos);
     /* else, before we can play any position, read the initial ogg header block */
     if (!info->initialized)
     {
@@ -208,7 +210,7 @@ static size_t pb_ensure_block(pb_toniefile_t *info, FILE *fd)
             fseek(fd, TONIEFILE_FRAME_SIZE, SEEK_SET);
             info->current_block_avail = fread(info->current_block_buffer, 1, 0x200, fd);
 #else
-            memcpy(info->current_block_buffer, &dummy_audio_start[TONIEFILE_FRAME_SIZE], 0x200);
+            memcpy(info->current_block_buffer, &dummy_audio[TONIEFILE_FRAME_SIZE], 0x200);
             info->current_block_avail = 0x200;
 #endif
         }
@@ -248,13 +250,40 @@ static size_t pb_ensure_block(pb_toniefile_t *info, FILE *fd)
         }
 #else
         uint32_t pos = info->current_block * TONIEFILE_FRAME_SIZE;
-        info->current_block_avail = TONIEFILE_FRAME_SIZE;
-        if(pos + info->current_block_avail > dummy_audio_size)
-        {
-            info->current_block_avail = dummy_audio_size - pos;
+        uint32_t remaining_size = TONIEFILE_FRAME_SIZE;
+        uint8_t* source = (uint8_t*)&dummy_audio[pos];
+        uint8_t* destination = (uint8_t*)info->current_block_buffer;
+
+        if (pos >= dummy_audio_size) {
+            ESP_LOGE(TAG, "Error: Position %" PRIu32 " exceeds dummy audio size %" PRIu32 ".", pos, dummy_audio_size);
+            info->current_block_avail = 0;
+        } else if (pos + remaining_size > dummy_audio_size) {
+            remaining_size = dummy_audio_size - pos;
+            ESP_LOGW(TAG, "Adjusting current block available size to %" PRIu32 " (was exceeding buffer).", remaining_size);
         }
 
-        memcpy(info->current_block_buffer, &dummy_audio_start[pos], info->current_block_avail);
+        info->current_block_avail = remaining_size;
+
+        const size_t chunk_size = 4096;
+        while (remaining_size > 0) {
+            size_t copy_size = (remaining_size >= chunk_size) ? chunk_size : remaining_size;
+            ESP_LOGI(TAG, "Copying %" PRIuPTR " bytes from %p to %p (remaining: %" PRIu32 ")", copy_size, (void*)source, (void*)destination, remaining_size);
+            memcpy(destination, source, copy_size);
+            source += copy_size;
+            destination += copy_size;
+            remaining_size -= copy_size;
+        }
+
+        // After the copy operation is completed
+        if (info->current_block_avail > 0) {
+            ESP_LOGI(TAG, "Copy completed for current block: %" PRIu32, info->current_block);
+        } else {
+            ESP_LOGI(TAG, "No data to copy for the current block.");
+        }
+
+        // More detailed logging if needed
+        ESP_LOGI(TAG, "Post-copy: Position: %" PRIu32 ", Remaining size: %" PRIu32,
+                pos, remaining_size);
 #endif
     }
     if (!pb_default_content)
@@ -282,7 +311,7 @@ int pb_toniefile_cbr(audio_element_handle_t self, char *buffer, int len, TickTyp
         ESP_LOGE(TAG, "Called from interrupt");
         return AEL_IO_DONE;
     }
-        ESP_LOGI(TAG, "opus_cbr len: %d", len);
+        //ESP_LOGI(TAG, "opus_cbr len: %d", len);
 
 
     /* doing seeking here, saves us some semaphores*/
@@ -1016,16 +1045,15 @@ void pb_init(esp_periph_set_handle_t set)
     i2s_stream_cfg_t i2s_cfg = I2S_STREAM_CFG_DEFAULT();
     i2s_cfg.type = AUDIO_STREAM_WRITER;
     i2s_cfg.i2s_config.use_apll = false;
-    //i2s_cfg.i2s_config.dma_buf_count = 4;
-    //i2s_cfg.i2s_config.dma_buf_len = 512;
+    i2s_cfg.i2s_config.dma_desc_num = 8;
+    i2s_cfg.i2s_config.dma_frame_num = 512;
 
     i2s_stream_writer = i2s_stream_init(&i2s_cfg);
 
     opus_decoder_cfg_t opus_dec_cfg = DEFAULT_OPUS_DECODER_CONFIG();
     opus_dec_cfg.stack_in_ext = false;
     opus_dec_cfg.task_prio = 20;
-    opus_dec_cfg.task_core = 1;
-    //opus_dec_cfg.out_rb_size = 5096;
+    opus_dec_cfg.out_rb_size = 4096;
     music_decoder = decoder_opus_init(&opus_dec_cfg);
 
     audio_pipeline_register(pipeline, music_decoder, "dec");
@@ -1035,7 +1063,7 @@ void pb_init(esp_periph_set_handle_t set)
     audio_pipeline_link(pipeline, &link_tag[0], 2);
     audio_element_set_read_cb(music_decoder, &pb_toniefile_cbr, &pb_toniefile_info);
 
-    ESP_LOGI(TAG, "Set up  event listener");
+    ESP_LOGI(TAG, "Set up event listener");
     audio_event_iface_cfg_t evt_cfg = AUDIO_EVENT_IFACE_DEFAULT_CFG();
     evt = audio_event_iface_init(&evt_cfg);
 

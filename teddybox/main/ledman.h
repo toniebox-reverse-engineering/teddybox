@@ -1,6 +1,15 @@
 #pragma once
 
 
+typedef enum
+{
+    SYSTEM_NORMAL,
+    SYSTEM_OFFLINE,
+    SYSTEM_LOWBATT,
+    NUM_SYSTEM_STATES // Keep this last
+} SystemState;
+
+
 #define COMMAND_SET_COLOR 0
 #define COMMAND_DELAY 1
 #define COMMAND_FADE 2
@@ -76,4 +85,4 @@ typedef struct
 
 void ledman_init();
 void ledman_change(const char *name);
-
+void ledman_set_system_state(SystemState state);

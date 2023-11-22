@@ -19,6 +19,7 @@
 #include "sdkconfig.h"
 #include "esp_vfs.h"
 #include "esp_vfs_fat.h"
+#include "esp_timer.h"
 #include "wear_levelling.h"
 #include "esp_partition.h"
 #include "esp_event.h"
@@ -139,7 +140,7 @@ static bool rtc_checksum_valid()
 
 void app_main(void)
 {
-    /* Initialize NVS — it is used to store PHY calibration data */
+    /* Initialize NVS — it is used to store PHY calibration data */ 
     esp_err_t ret = nvs_flash_init();
     if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND)
     {
@@ -147,7 +148,7 @@ void app_main(void)
         ret = nvs_flash_init();
     }
     ESP_ERROR_CHECK(ret);
-
+    
     esp_log_level_set("*", ESP_LOG_WARN);
     esp_log_level_set(TAG, ESP_LOG_INFO);
 
@@ -179,7 +180,7 @@ void app_main(void)
     ESP_LOGI(TAG, " - Start playback");
     pb_init(set);
 
-    xTaskCreate(print_all_tasks, "print_all_tasks", 4096, NULL, 5, NULL);
+    // xTaskCreate(print_all_tasks, "print_all_tasks", 4096, NULL, 5, NULL);
 
     if (rtc_storage.rtc_magic != 0xDEADC0DE || !rtc_checksum_valid())
     {
@@ -200,6 +201,10 @@ void app_main(void)
 
     dac3100_set_mute(true);
 
+
+    ESP_LOGI(TAG, " - Play startup tone");
+    pb_play_default(CONTENT_DEFAULT_STARTUP);
+
     bool ear_big_prev = false;
     bool ear_small_prev = false;
 
@@ -216,11 +221,8 @@ void app_main(void)
     ESP_LOGI(TAG, " - Start WWW");
     www_init();
 
-    // ESP_LOGI(TAG, "Unmount assets again");
-    // esp_vfs_fat_spiflash_unmount("/spiflash", s_test_wl_handle);
-
-    ESP_LOGI(TAG, " - Play startup tone");
-    pb_play_default(CONTENT_DEFAULT_STARTUP);
+    //ESP_LOGI(TAG, "Unmount assets again");
+    //esp_vfs_fat_spiflash_unmount("/spiflash", s_test_wl_handle);
 
     int64_t last_activity_time = esp_timer_get_time();
     int64_t last_adc_time = esp_timer_get_time();
@@ -228,12 +230,32 @@ void app_main(void)
 
     while (1)
     {
-        vTaskDelay(100000 / portTICK_PERIOD_MS);
+        vTaskDelay(100 / portTICK_PERIOD_MS);
         int64_t cur_time = esp_timer_get_time();
 
-        if (cur_time - last_adc_time > 500000)
+        if (cur_time - last_adc_time > 1000000)
         {
-            // ESP_LOGI(TAG, "Vbatt: %f", audio_board_get_vbatt());
+            float vbatt = audio_board_get_vbatt();
+            float vcell = vbatt / 3;
+
+            const char *state = "";
+
+            if(vcell < 0.9)
+            {
+                state = " <<LOW>>";
+                ledman_set_system_state(SYSTEM_LOWBATT);
+            }
+            else if(vcell > 1.29)
+            {
+                state = " <<OVERVOLTAGE>>";
+                ledman_set_system_state(SYSTEM_LOWBATT);
+            }
+            else if(vcell > 1.2)
+            {
+                state = " <<FULL>>";
+            }
+            ESP_LOGI(TAG, "Vbatt: %2.2f V (cell: %2.2f V)%s, Charger: %s", vbatt, vcell, state, (audio_board_get_vcharger() > 1.0) ? "CHARGING" : "idle");
+            last_adc_time = cur_time;
         }
 
         bool ear_big = audio_board_ear_big();

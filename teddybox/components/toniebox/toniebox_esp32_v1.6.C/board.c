@@ -184,7 +184,7 @@ audio_board_handle_t audio_board_init(void)
     gpio_set_intr_type(TRF7962A_IRQ_GPIO, GPIO_INTR_POSEDGE);
     gpio_intr_enable(TRF7962A_IRQ_GPIO);
 
-    //adc_init();
+    adc_init();
 
     return board_handle;
 }
@@ -294,7 +294,8 @@ void audio_board_poweroff()
 
 float audio_board_get_vbatt()
 {
-    return adc_get(1);
+    /* measured manually */
+    return adc_get(1) * 1.175f;
 }
 
 float audio_board_get_vcharger()

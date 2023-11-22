@@ -30,7 +30,8 @@ const State states[] = {
 
     {.name = "fade green", .seq = (const SequenceCommand[]){FADE(0, 100, 0, 200, 10), END()}},
 
-    {.name = "rose", .seq = (const SequenceCommand[]){SET_COLOR(100, 40, 40), END()}},
+    {.name = "rose", .seq = (const SequenceCommand[]){SET_COLOR(100, 10, 10), END()}},
+    {.name = "fadeblink rose", .seq = (const SequenceCommand[]){FADE(100, 10, 10, 200, 10), DELAY(500), FADE(0, 0, 0, 200, 10), DELAY(500), LOOP()}},
 
     {.name = "fadeblink red", .seq = (const SequenceCommand[]){SET_COLOR(100, 0, 0), DELAY(500), SET_COLOR(0, 0, 0), DELAY(500), LOOP()}},
     {.name = "fadeblink green", .seq = (const SequenceCommand[]){SET_COLOR(0, 100, 0), DELAY(500), SET_COLOR(0, 0, 0), DELAY(500), LOOP()}},
@@ -38,18 +39,11 @@ const State states[] = {
 
     {.name = "fadeblink blue-green", .seq = (const SequenceCommand[]){FADE(0, 0, 100, 200, 10), FADE(0, 100, 0, 200, 10), LOOP()}},
     {.name = "fadeblink blue-red", .seq = (const SequenceCommand[]){FADE(0, 0, 100, 200, 10), FADE(100, 0, 0, 200, 10), LOOP()}},
+    {.name = "fadeblink green-red", .seq = (const SequenceCommand[]){FADE(0, 100, 0, 200, 10), FADE(100, 0, 0, 200, 10), LOOP()}},
 
     {.name = "fadeblink blue-red slow", .seq = (const SequenceCommand[]){FADE(0, 0, 100, 800, 10), FADE(100, 0, 0, 800, 10), LOOP()}},
     {.name = "fadeblink blue-green slow", .seq = (const SequenceCommand[]){FADE(0, 0, 100, 1000, 10), FADE(0, 100, 0, 1000, 10), LOOP()}}
 };
-
-typedef enum
-{
-    SYSTEM_NORMAL,
-    SYSTEM_OFFLINE,
-    SYSTEM_LOWBATT,
-    NUM_SYSTEM_STATES // Keep this last
-} SystemState;
 
 typedef struct
 {
@@ -79,7 +73,7 @@ static const StateMapping *stateMappings[NUM_SYSTEM_STATES] = {
     [SYSTEM_LOWBATT] = (const StateMapping[]){
         {"off", "off"},
         {"poweroff", "fade off"},
-        {"idle", "rose"},
+        {"idle", "fadeblink rose"},
         {"checking", "fadeblink blue-red"},
         {"playing", "fadeblink green-red"},
         {"playing download", "fadeblink blue-red slow"},
