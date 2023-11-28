@@ -9,6 +9,7 @@
 
 static const char *TAG = "LEDMan";
 static QueueHandle_t ledman_queue;
+static const char *current_state = "";
 
 const State states[] = {
     {.name = "fade in",
@@ -169,10 +170,16 @@ static void ledman_execute(const SequenceCommand *sequence)
 void ledman_set_system_state(SystemState state)
 {
     current_system_state = state;
+    /* re-set the current state, maybe animation changes */
+    ledman_change(current_state);
 }
 
 void ledman_change(const char *requestedState)
 {
+    /* remember state for cases when the system state changes */
+    current_state = requestedState;
+
+    /* now map the state name to the defined sequence */
     const char *actualState = requestedState;
     const StateMapping *currentMappings = stateMappings[current_system_state];
 
