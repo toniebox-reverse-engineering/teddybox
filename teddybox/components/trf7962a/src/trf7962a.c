@@ -166,11 +166,12 @@ void trf7962a_irq_reset(trf7962a_t ctx)
     }
 }
 
+/* initially that sould wait for an interrupt to happen, but that doesn't work properly */
 bool trf7962a_irq_check(trf7962a_t ctx)
 {
     uint32_t dummy;
     ctx->irq_status = trf7962a_irq_status(ctx);
-    if (!xQueueReceive(ctx->irq_received, &dummy, 0))
+    if (!xQueueReceive(ctx->irq_received, &dummy, 20 / portTICK_PERIOD_MS))
     {
         return false;
     }
@@ -282,7 +283,7 @@ esp_err_t trf7962a_write_packet(trf7962a_t ctx, uint8_t *data, uint8_t length)
         if (ctx->irq_status & 0x80)
         {
             /* TRF7960 quirk weirdness here. sloa248b.pdf 4.6 says we *must* reset FIFO after Tx phase finished.
-               however this kills all functionality. Original datasheet doesn't say anything about. that
+               however this kills all functionality. Original datasheet doesn't say anything about that.
                So don't do it despite sloa248b.pdf saying, not doing this causes Rx trouble...
              */
             // trf7962a_command(ctx, CMD_RESET_FIFO);
@@ -381,7 +382,9 @@ esp_err_t trf7962a_xmit(trf7962a_t ctx, uint8_t *tx_data, uint8_t tx_length, uin
     {
         return ESP_FAIL;
     }
-    ESP_LOGD(TAG, "Tx %d bytes", tx_length);
+    //ESP_LOGD(TAG, "Tx %d bytes", tx_length);
+    
+    int64_t t_before_us = esp_timer_get_time();
     if (trf7962a_write_packet(ctx, tx_data, tx_length) != ESP_OK)
     {
         return ESP_FAIL;
@@ -390,7 +393,8 @@ esp_err_t trf7962a_xmit(trf7962a_t ctx, uint8_t *tx_data, uint8_t tx_length, uin
     {
         return ESP_FAIL;
     }
-    ESP_LOGD(TAG, "Rx finished, %d bytes read", *rx_length);
+    int64_t after_us = esp_timer_get_time();
+    ESP_LOGI(TAG, "NFC xfer took %lld us", after_us - t_before_us);
 
     /* ToDo: check for invalid checksum */
 
@@ -415,9 +419,9 @@ void trf7962a_dump_regs(trf7962a_t ctx)
 
 void IRAM_ATTR trf7962a_isr(void *ctx_in)
 {
-    //trf7962a_t ctx = (trf7962a_t)ctx_in;
-    //uint32_t value = 0;
-    //xQueueSendFromISR(ctx->irq_received, &value, NULL);
+    trf7962a_t ctx = (trf7962a_t)ctx_in;
+    uint32_t value = 0;
+    xQueueSendFromISR(ctx->irq_received, &value, NULL);
 }
 
 void trf7962a_field(trf7962a_t ctx, bool enabled)
