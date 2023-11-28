@@ -15,35 +15,35 @@ const State states[] = {
     {.name = "fade in",
      .seq = (const SequenceCommand[]){
          SET_COLOR(100, 100, 100),
-         FADE(0, 0, 100, 300, 10),
-         FADE(100, 0, 100, 300, 10),
-         FADE(0, 100, 0, 800, 10),
+         FADE(0, 0, 100, 300, 50),
+         FADE(100, 0, 100, 300, 50),
+         FADE(0, 100, 0, 800, 50),
          END()}},
 
     {.name = "on", .seq = (const SequenceCommand[]){SET_COLOR(0, 100, 0), END()}},
     {.name = "off", .seq = (const SequenceCommand[]){SET_COLOR(0, 0, 0), END()}},
-    {.name = "fade off", .seq = (const SequenceCommand[]){FADE(0, 0, 0, 500, 10), END()}},
+    {.name = "fade off", .seq = (const SequenceCommand[]){FADE(0, 0, 0, 500, 50), END()}},
 
     {.name = "red", .seq = (const SequenceCommand[]){SET_COLOR(100, 0, 0), END()}},
     {.name = "green", .seq = (const SequenceCommand[]){SET_COLOR(0, 100, 0), END()}},
     {.name = "blue", .seq = (const SequenceCommand[]){SET_COLOR(0, 0, 100), END()}},
     {.name = "white", .seq = (const SequenceCommand[]){SET_COLOR(100, 100, 100), END()}},
 
-    {.name = "fade green", .seq = (const SequenceCommand[]){FADE(0, 100, 0, 200, 10), END()}},
+    {.name = "fade green", .seq = (const SequenceCommand[]){FADE(0, 100, 0, 200, 50), END()}},
 
-    {.name = "rose", .seq = (const SequenceCommand[]){SET_COLOR(100, 10, 10), END()}},
-    {.name = "fadeblink rose", .seq = (const SequenceCommand[]){FADE(100, 10, 10, 200, 10), DELAY(500), FADE(0, 0, 0, 200, 10), DELAY(500), LOOP()}},
+    {.name = "rose", .seq = (const SequenceCommand[]){SET_COLOR(100, 10, 50), END()}},
+    {.name = "fadeblink rose", .seq = (const SequenceCommand[]){FADE(100, 10, 10, 200, 50), DELAY(500), FADE(0, 0, 0, 200, 50), DELAY(500), LOOP()}},
 
     {.name = "fadeblink red", .seq = (const SequenceCommand[]){SET_COLOR(100, 0, 0), DELAY(500), SET_COLOR(0, 0, 0), DELAY(500), LOOP()}},
     {.name = "fadeblink green", .seq = (const SequenceCommand[]){SET_COLOR(0, 100, 0), DELAY(500), SET_COLOR(0, 0, 0), DELAY(500), LOOP()}},
     {.name = "fadeblink blue", .seq = (const SequenceCommand[]){SET_COLOR(0, 0, 100), DELAY(500), SET_COLOR(0, 0, 0), DELAY(500), LOOP()}},
 
-    {.name = "fadeblink blue-green", .seq = (const SequenceCommand[]){FADE(0, 0, 100, 200, 10), FADE(0, 100, 0, 200, 10), LOOP()}},
-    {.name = "fadeblink blue-red", .seq = (const SequenceCommand[]){FADE(0, 0, 100, 200, 10), FADE(100, 0, 0, 200, 10), LOOP()}},
-    {.name = "fadeblink green-red", .seq = (const SequenceCommand[]){FADE(0, 100, 0, 200, 10), FADE(100, 0, 0, 200, 10), LOOP()}},
+    {.name = "fadeblink blue-green", .seq = (const SequenceCommand[]){FADE(0, 0, 100, 200, 50), FADE(0, 100, 0, 200, 50), LOOP()}},
+    {.name = "fadeblink blue-red", .seq = (const SequenceCommand[]){FADE(0, 0, 100, 200, 50), FADE(100, 0, 0, 200, 50), LOOP()}},
+    {.name = "fadeblink green-red", .seq = (const SequenceCommand[]){FADE(0, 100, 0, 200, 50), FADE(100, 0, 0, 200, 50), LOOP()}},
 
-    {.name = "fadeblink blue-red slow", .seq = (const SequenceCommand[]){FADE(0, 0, 100, 800, 10), FADE(100, 0, 0, 800, 10), LOOP()}},
-    {.name = "fadeblink blue-green slow", .seq = (const SequenceCommand[]){FADE(0, 0, 100, 1000, 10), FADE(0, 100, 0, 1000, 10), LOOP()}}
+    {.name = "fadeblink blue-red slow", .seq = (const SequenceCommand[]){FADE(0, 0, 100, 800, 50), FADE(100, 0, 0, 800, 50), LOOP()}},
+    {.name = "fadeblink blue-green slow", .seq = (const SequenceCommand[]){FADE(0, 0, 100, 1000, 50), FADE(0, 100, 0, 1000, 50), LOOP()}}
 };
 
 typedef struct
