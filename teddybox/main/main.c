@@ -303,13 +303,12 @@ void app_main(void)
             dac3100_set_mute(!pb_is_playing());
         }
 
-        if (pb_is_playing() || ear_big || ear_small)
-        {
-            last_activity_time = cur_time;
-        }
-
         if (pb_is_playing())
         {
+            if (ear_big || ear_small)
+            {
+                last_activity_time = cur_time;
+            }
             rtc_storage.nfc_uid = pb_get_current_uid();
             rtc_storage.play_position = pb_get_play_position();
         }
