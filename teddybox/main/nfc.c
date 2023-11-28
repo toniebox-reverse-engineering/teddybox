@@ -36,8 +36,7 @@ static const char *TAG = "[NFC]";
 typedef enum
 {
     STATE_SEARCHING,
-    STATE_TAG,
-    STATE_SYSINFO
+    STATE_TAG
 } nfc_state_t;
 
 uint64_t nfc_get_current_uid()
@@ -121,18 +120,11 @@ esp_err_t nfc_reset(trf7962a_t trf)
 /* when token was detected, try to start playback using UID */
 static void nfc_play()
 {
-    pb_play_content(nfc_get_current_uid());
 }
 
 /* later, when memory was read, call pb handler so it will be able to download the file */
 static void nfc_play_token()
 {
-    pb_play_content_token(nfc_get_current_uid(), nfc_get_current_token());
-}
-
-static void nfc_stop()
-{
-    pb_stop();
 }
 
 void nfc_mainthread(void *arg)
@@ -142,113 +134,57 @@ void nfc_mainthread(void *arg)
 
     while (true)
     {
-        vTaskDelay(10 / portTICK_PERIOD_MS);
+        uint32_t delay_ms = 100;
 
         switch (state)
         {
-        case STATE_SYSINFO:
-        {
-            if (trf7962a_xmit(trf, slix_system_info, sizeof(slix_system_info), received_data, &received_length) != ESP_OK)
-            {
-                nfc_reset(trf);
-                ESP_LOGE(TAG, "Failed to read SYSINFO");
-                if (nfc_retry++ > NFC_RETRIES)
-                {
-                    state = STATE_SEARCHING;
-                }
-                break;
-            }
-            nfc_log_dump("SYSINFO", received_data, received_length);
-            break;
-        }
-
-        case STATE_TAG:
-        {
-            if (trf7962a_xmit(trf, slix_get_inventory, sizeof(slix_get_inventory), received_data, &received_length) != ESP_OK)
-            {
-                nfc_reset(trf);
-                // ESP_LOGE(TAG, "Failed to read INVENTORY");
-                if (nfc_retry++ > NFC_RETRIES)
-                {
-                    state = STATE_SEARCHING;
-                }
-                break;
-            }
-            nfc_log_dump("INVENTORY", received_data, received_length);
-            if (received_length != 12 || received_data[0] != 0)
-            {
-                nfc_reset(trf);
-                // ESP_LOGE(TAG, "received INVENTORY with %d bytes, status %d", received_length, received_data[0]);
-                if (nfc_retry++ > NFC_RETRIES)
-                {
-                    state = STATE_SEARCHING;
-                }
-                break;
-            }
-
-            nfc_retry = 0;
-
-            nfc_dump(dump_buf, &received_data[2], 8);
-
-            if (!nfc_valid)
-            {
-                nfc_valid = true;
-                memcpy(nfc_current_uid_rev, &received_data[2], 8);
-                ESP_LOGI(TAG, "Tag entered: %llX", nfc_get_current_uid());
-                nfc_play();
-                vTaskDelay(1000 / portTICK_PERIOD_MS);
-                nfc_play_token();
-            }
-            else
-            {
-                if (memcmp(nfc_current_uid_rev, &received_data[2], 8))
-                {
-                    memcpy(nfc_current_uid_rev, &received_data[2], 8);
-                    ESP_LOGI(TAG, "Tag changed: %llX", nfc_get_current_uid());
-                    nfc_play();
-                }
-            }
-            memcpy(nfc_current_uid_rev, &received_data[2], 8);
-            vTaskDelay(250 / portTICK_PERIOD_MS);
-            break;
-        }
-
+        /* search for a valid tag */
         case STATE_SEARCHING:
         {
             uint8_t rand[2];
 
+            /* if previous state gave a valid NFC tag, it seems to have disappeared */
             if (nfc_valid)
             {
                 nfc_valid = false;
                 nfc_dump(dump_buf, nfc_current_uid_rev, 8);
                 ESP_LOGI(TAG, "Tag disappeared: %s", dump_buf);
-                nfc_stop();
+
+                /* signal playback to stop */
+                pb_stop();
             }
 
+            /* ok, now search for a tag by asking for a RAND */
             if (nfc_get_rand(trf, rand) != ESP_OK)
             {
+                /* none is responding. noone out there... */
                 nfc_reset(trf);
                 break;
             }
+
+            /* try to read inventory response. locked tags will not answer */
             if (trf7962a_xmit(trf, slix_get_inventory, sizeof(slix_get_inventory), received_data, &received_length) == ESP_OK)
             {
+                /* okay, already unlocked, no need to unlock */
                 ESP_LOGI(TAG, "Unlocked tag found");
                 state = STATE_TAG;
                 break;
             }
-            ESP_LOGI(TAG, "Locked tag detected");
 
-            bool unlocked = false;
+            ESP_LOGI(TAG, "Locked tag detected, unlocking");
 
+            /* try all known passwords */
             for (int pass = 0; pass < COUNT(passes); pass++)
             {
-                ESP_LOGI(TAG, "Test pass 0x%08lX", passes[pass]);
+                ESP_LOGI(TAG, "  Test pass 0x%08lX", passes[pass]);
 
+                /* in any case, drop field (=power) for the tag so it will reset */
                 nfc_reset(trf);
 
+                /* now get the RAND we use to authenticate */
                 if (nfc_get_rand(trf, rand) != ESP_OK)
                 {
-                    ESP_LOGE(TAG, "GET RANDOM failed unexpectedly");
+                    ESP_LOGE(TAG, "  GET RANDOM failed unexpectedly");
                     continue;
                 }
 
@@ -259,34 +195,111 @@ void nfc_mainthread(void *arg)
                 slix_set_pass[6] = (passes[pass] >> 16) ^ rand[0];
                 slix_set_pass[7] = (passes[pass] >> 24) ^ rand[1];
 
-                nfc_log_dump("SET PASS", slix_set_pass, sizeof(slix_set_pass));
+                /* with field enabled, write the password to unlock it */
+                nfc_log_dump("  SET PASS", slix_set_pass, sizeof(slix_set_pass));
                 if (trf7962a_xmit(trf, slix_set_pass, sizeof(slix_set_pass), received_data, &received_length) != ESP_OK)
                 {
-                    nfc_reset(trf);
-                    ESP_LOGE(TAG, "  Password incorrect");
+                    /* did not answer, reset tag and try again */
+                    ESP_LOGE(TAG, "    Password incorrect");
                     continue;
                 }
-                nfc_log_dump("  SET PASS", received_data, received_length);
+
+                //nfc_log_dump("  SET PASS", received_data, received_length);
                 if (received_length != 3 || received_data[0] != 0)
                 {
-                    nfc_reset(trf);
-                    ESP_LOGE(TAG, "  Password incorrect - %d bytes, status %d", received_length, received_data[0]);
+                    /* invalid command, reset tag and try again */
+                    ESP_LOGE(TAG, "    Password incorrect - %d bytes, status %d", received_length, received_data[0]);
                     continue;
                 }
-                unlocked = true;
-                break;
-            }
 
-            if (unlocked)
-            {
-                ESP_LOGI(TAG, "Unlocked tag");
+                /* unlock was successful */
+                ESP_LOGI(TAG, "  Successfully unlocked tag");
                 nfc_retry = 0;
                 state = STATE_TAG;
             }
-
             break;
         }
+
+        /* we found a tag and shall check if it still there */
+        case STATE_TAG:
+        {
+            /* for now just do a INVENTORY to check if any tag is there */
+            if (trf7962a_xmit(trf, slix_get_inventory, sizeof(slix_get_inventory), received_data, &received_length) != ESP_OK)
+            {
+                /* nope, nothing found. reset and give another chance */
+                nfc_reset(trf);
+                if (nfc_retry++ > NFC_RETRIES)
+                {
+                    state = STATE_SEARCHING;
+                }
+                break;
+            }
+
+            /* okay, command succeeded. check response */
+            nfc_log_dump("INVENTORY", received_data, received_length);
+            if (received_length != 12 || received_data[0] != 0)
+            {
+                /* weird response. reset tag and give another chance */
+                nfc_reset(trf);
+                if (nfc_retry++ > NFC_RETRIES)
+                {
+                    state = STATE_SEARCHING;
+                }
+                break;
+            }
+
+            /* command succeeded */
+            nfc_retry = 0;
+
+            nfc_dump(dump_buf, &received_data[2], 8);
+
+            if (!nfc_valid)
+            {
+                /* previously we had no tag, now we have one. report in */
+                nfc_valid = true;
+                memcpy(nfc_current_uid_rev, &received_data[2], 8);
+                ESP_LOGI(TAG, "Tag entered: %llX", nfc_get_current_uid());
+                
+                /* signal to play back the UID */
+                pb_play_content(nfc_get_current_uid());
+
+                /* yeah, bit hacky */
+                vTaskDelay(1000 / portTICK_PERIOD_MS);
+                
+                /* later, when memory was read, call pb handler so it will be able to download the file */
+                pb_play_content_token(nfc_get_current_uid(), nfc_get_current_token());
+            }
+            else if (memcmp(nfc_current_uid_rev, &received_data[2], 8))
+            {
+                /* the tag UID has changed */
+                memcpy(nfc_current_uid_rev, &received_data[2], 8);
+                ESP_LOGI(TAG, "Tag changed: %llX", nfc_get_current_uid());
+
+                /* signal to play back the UID */
+                pb_play_content(nfc_get_current_uid());
+
+                /* yeah, bit hacky */
+                vTaskDelay(1000 / portTICK_PERIOD_MS);
+                
+                /* later, when memory was read, call pb handler so it will be able to download the file */
+                pb_play_content_token(nfc_get_current_uid(), nfc_get_current_token());
+            }
+            else
+            {
+                /* nothing changed */
+            }
+
+            memcpy(nfc_current_uid_rev, &received_data[2], 8);
+
+            /* check the tag once every 250ms is probably enough */
+            delay_ms = 250;
+            break;
         }
+
+
+        }
+        
+        vTaskDelay(delay_ms / portTICK_PERIOD_MS);
     }
 }
 
