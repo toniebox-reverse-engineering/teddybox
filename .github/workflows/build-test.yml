@@ -25,4 +25,5 @@ jobs:
       - name: Build
         run: |
           . ./env_vars.sh
+          cd teddybox
           idf.py build
