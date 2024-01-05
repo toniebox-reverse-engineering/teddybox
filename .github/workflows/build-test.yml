@@ -1,0 +1,29 @@
+name: Firmware build test
+
+on: [push,pull_request]
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+
+    steps:
+      - uses: actions/checkout@v3
+      - uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cache/pip
+            ~/.platformio/.cache
+          key: ${{ runner.os }}-pio
+      - uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+          
+      - name: Setup
+        run: |
+          ./setup_libs.sh
+
+      - name: Build
+        run: |
+          . ./env_vars.sh
+          cd teddybox
+          idf.py build
